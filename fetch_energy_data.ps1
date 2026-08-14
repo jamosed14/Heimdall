@@ -4,7 +4,16 @@
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $root "eia_config.ps1")
+# Local dev: dot-source the gitignored config file. CI (GitHub Actions): fall back to the
+# EIA_API_KEY env var, populated from a repo secret - the key is never written to disk there.
+$eiaConfigPath = Join-Path $root "eia_config.ps1"
+if (Test-Path $eiaConfigPath) {
+    . $eiaConfigPath
+} elseif ($env:EIA_API_KEY) {
+    $EIA_API_KEY = $env:EIA_API_KEY
+} else {
+    throw "EIA_API_KEY not found - create eia_config.ps1 locally or set the EIA_API_KEY env var/secret in CI."
+}
 
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }

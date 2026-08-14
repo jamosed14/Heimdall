@@ -18,8 +18,24 @@
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $root "fred_config.ps1")
-. (Join-Path $root "eia_config.ps1")
+# Local dev: dot-source the gitignored config files. CI (GitHub Actions): fall back to
+# FRED_API_KEY/EIA_API_KEY env vars, populated from repo secrets - never written to disk there.
+$fredConfigPath = Join-Path $root "fred_config.ps1"
+if (Test-Path $fredConfigPath) {
+    . $fredConfigPath
+} elseif ($env:FRED_API_KEY) {
+    $FRED_API_KEY = $env:FRED_API_KEY
+} else {
+    throw "FRED_API_KEY not found - create fred_config.ps1 locally or set the FRED_API_KEY env var/secret in CI."
+}
+$eiaConfigPath = Join-Path $root "eia_config.ps1"
+if (Test-Path $eiaConfigPath) {
+    . $eiaConfigPath
+} elseif ($env:EIA_API_KEY) {
+    $EIA_API_KEY = $env:EIA_API_KEY
+} else {
+    throw "EIA_API_KEY not found - create eia_config.ps1 locally or set the EIA_API_KEY env var/secret in CI."
+}
 
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }

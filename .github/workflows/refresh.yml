@@ -1,0 +1,46 @@
+name: Nightly data refresh
+
+# Runs independently of Jameson's PC - no dependency on it being on/awake. Uses the same
+# fetch_*.ps1 scripts as local dev; FRED_API_KEY/EIA_API_KEY come from repo secrets (Settings ->
+# Secrets and variables -> Actions), never written to disk or committed. See fetch_macro_data.ps1
+# / fetch_energy_data.ps1 / fetch_ai_data.ps1 for the local-file-vs-env-var fallback logic.
+
+on:
+  schedule:
+    # 06:00 UTC daily - comfortably after UTC midnight so blockchain.info's prior-day close and
+    # other daily sources have published, independent of any single timezone.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run fetch scripts
+        shell: pwsh
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "./fetch_btc_data.ps1"
+          & "./fetch_macro_data.ps1"
+          & "./fetch_energy_data.ps1"
+          & "./fetch_ai_data.ps1"
+
+      - name: Commit and push if data changed
+        run: |
+          git config user.name "heimdall-refresh-bot"
+          git config user.email "actions@github.com"
+          git add data/*.js
+          if git diff --cached --quiet; then
+            echo "No data changes - skipping commit."
+          else
+            git commit -m "Data refresh $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push
+          fi

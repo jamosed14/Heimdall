@@ -5,7 +5,16 @@
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $root "fred_config.ps1")
+# Local dev: dot-source the gitignored config file. CI (GitHub Actions): fall back to the
+# FRED_API_KEY env var, populated from a repo secret - the key is never written to disk there.
+$fredConfigPath = Join-Path $root "fred_config.ps1"
+if (Test-Path $fredConfigPath) {
+    . $fredConfigPath
+} elseif ($env:FRED_API_KEY) {
+    $FRED_API_KEY = $env:FRED_API_KEY
+} else {
+    throw "FRED_API_KEY not found - create fred_config.ps1 locally or set the FRED_API_KEY env var/secret in CI."
+}
 
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
