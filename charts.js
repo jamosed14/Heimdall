@@ -103,6 +103,7 @@ window.HeimdallCharts = (function () {
           scales: {
             x: {
               type: "linear",
+              bounds: "data",
               grid: { display: false },
               border: { color: "#2c2620" },
               ticks: {
@@ -117,6 +118,7 @@ window.HeimdallCharts = (function () {
               var lastLabelLog = null;
               return {
                 type: logScale ? "logarithmic" : "linear",
+                bounds: "data",
                 grid: { color: "#1a160f" },
                 border: { color: "#2c2620" },
                 ticks: {
