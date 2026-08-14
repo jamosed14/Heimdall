@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Inflation</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">INFLATION</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">By a continuing process of inflation, governments can confiscate, secretly and unobserved, an important part of the wealth of their citizens.</div>
+    <div class="quote-attribution">— John Maynard Keynes</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-heading">Official</div>
+  <div class="section-sub">CPI and PCE are monthly releases with a reporting lag — the date shown is the observation month, not today.</div>
+  <div class="stat-grid" id="group-observed"></div>
+
+  <div class="section-heading">Market Inflation Expectations</div>
+  <div class="section-sub">Daily market pricing (Treasury breakevens) — changes in basis points.</div>
+  <div class="stat-grid" id="group-expectations"></div>
+
+  <div class="section-heading">Underlying / Robust</div>
+  <div class="section-sub">Cleveland Fed Median &amp; 16% Trimmed-Mean CPI, Atlanta Fed Sticky-Price CPI — alternative published methodologies, not the same calculation as headline/core CPI.</div>
+  <div class="stat-grid" id="group-robust"></div>
+
+  <div class="section-heading">Money</div>
+  <div class="section-sub">Monetary expansion, tracked separately from price inflation rather than assumed to move it one-for-one.</div>
+  <div class="stat-grid" id="group-money"></div>
+
+  <div class="section-heading">Heimdall <span class="calc-badge">calculated</span></div>
+  <div class="calc-note">Both derived from the same BLS CPI index, rebased to 100 at <span id="cpiBaseNote">—</span>. Purchasing Power falls as prices rise; Price Level is its mirror, showing cumulative cost growth.</div>
+  <div class="stat-grid" id="group-heimdall"></div>
+
+  <div class="section-heading">Charts</div>
+  <div class="chart-grid">
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">CPI: Headline vs Core (YoY)</div><div class="panel-sub">Monthly, seasonally adjusted</div></div>
+        <button class="scale-toggle" id="chartCpiCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartCpi"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">PCE: Headline vs Core (YoY)</div><div class="panel-sub">Monthly, seasonally adjusted — the Fed's preferred gauge</div></div>
+        <button class="scale-toggle" id="chartPceCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartPce"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Breakeven Inflation</div><div class="panel-sub">5Y and 10Y, daily market pricing</div></div>
+        <button class="scale-toggle" id="chartBreakevenCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartBreakeven"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Median / Trimmed / Sticky CPI</div><div class="panel-sub">Cleveland &amp; Atlanta Fed robust measures</div></div>
+        <button class="scale-toggle" id="chartRobustCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartRobust"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">M2 YoY vs M2 / Nominal GDP</div><div class="panel-sub">Monetary expansion, tracked separately from prices</div></div>
+        <button class="scale-toggle" id="chartMoneyCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartMoney"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Purchasing Power vs Price Level</div><div class="panel-sub">Heimdall calculated · both indexed to 100 at base date</div></div>
+        <button class="scale-toggle" id="chartPurchasingPowerCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartPurchasingPower"></canvas></div>
+    </div>
+  </div>
+  <div class="range-toggle" id="rangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="1Y">1Y</button>
+    <button data-range="3Y">3Y</button>
+    <button data-range="5Y">5Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "inflation";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/macro_data.js"></script>
+<script src="inflation_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

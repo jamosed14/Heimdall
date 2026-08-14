@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Rates</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">RATES</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">The rate of interest expresses a price in the exchange between present and future goods.</div>
+    <div class="quote-attribution">— Irving Fisher</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-heading">Headline Yields</div>
+  <div class="stat-grid" id="group-headline"></div>
+
+  <div class="section-heading">Curve / Spreads</div>
+  <div class="section-sub">Changes shown in basis points.</div>
+  <div class="stat-grid" id="group-spreads"></div>
+
+  <div class="section-heading">Yield Curve</div>
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header">
+      <div>
+        <div class="panel-title">Current Treasury Curve</div>
+        <div class="panel-sub" id="curveSub">Solid = now · dashed = 1 month ago · dotted = 1 year ago</div>
+      </div>
+      <div class="chart-controls">
+        <button class="scale-toggle" id="curveCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="curveChart"></canvas></div>
+  </div>
+
+  <div class="section-heading">History</div>
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div>
+        <div class="panel-title">2Y / 10Y / 30Y Treasury</div>
+        <div class="panel-sub">Daily par yields</div>
+      </div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="rangeToggle">
+          <button data-range="1M">1M</button>
+          <button data-range="3M">3M</button>
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y">3Y</button>
+          <button data-range="5Y">5Y</button>
+          <button data-range="MAX" class="active">MAX</button>
+        </div>
+        <button class="scale-toggle" id="yieldHistCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="yieldHistChart"></canvas></div>
+    <div class="legend-row">
+      <span class="legend-item"><span class="legend-swatch price"></span>10Y</span>
+      <span class="legend-item"><span class="legend-swatch ma"></span>2Y</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#5b8def"></span>30Y</span>
+    </div>
+  </div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "rates";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/macro_data.js"></script>
+<script src="rates_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

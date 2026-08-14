@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Summary</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left">
+    <span class="symbol">SUMMARY</span>
+    <span id="liveBtcMount"></span>
+  </div>
+  <div class="note" id="liveBtcNote">connecting…</div>
+</div>
+
+<div class="hero-banner">
+  <div class="hero-banner-inner">
+    <div class="hero-wordmark">Heimdall <span class="hero-accent">Catallaxy</span></div>
+    <div class="brand-quote">
+      <div class="quote-text">The history of government management of money has, except for a few happy periods, been one of incessant fraud and deception.</div>
+      <div class="quote-attribution">— F. A. Hayek</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div id="nav"></div>
+
+  <div class="summary-grid" id="summaryGrid"></div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "summary";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="data/btc_data.js"></script>
+<script src="data/macro_data.js"></script>
+<script src="data/energy_data.js"></script>
+<script src="summary_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

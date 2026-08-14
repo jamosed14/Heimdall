@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Dollar &amp; FX</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">DOLLAR / FX</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">The dollar is our currency, but it's your problem.</div>
+    <div class="quote-attribution">— John Connally</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-heading">Headline</div>
+  <div class="stat-grid" id="group-fx"></div>
+
+  <div class="section-heading">DXY History</div>
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header">
+      <div>
+        <div class="panel-title">ICE US Dollar Index</div>
+        <div class="panel-sub">Daily close</div>
+      </div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="dxyRangeToggle">
+          <button data-range="1M">1M</button>
+          <button data-range="3M">3M</button>
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y">3Y</button>
+          <button data-range="MAX" class="active">MAX</button>
+        </div>
+        <button class="scale-toggle" id="dxyCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartDxy"></canvas></div>
+  </div>
+
+  <div class="section-heading">FX Pair History</div>
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div>
+        <div class="panel-title" id="pairTitle">EUR/USD</div>
+        <div class="panel-sub">FRED daily spot</div>
+      </div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="pairPicker">
+          <button data-pair="eurusd" class="active">EUR/USD</button>
+          <button data-pair="usdjpy">USD/JPY</button>
+        </div>
+        <div class="range-toggle" id="pairRangeToggle">
+          <button data-range="1M">1M</button>
+          <button data-range="3M">3M</button>
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y">3Y</button>
+          <button data-range="MAX" class="active">MAX</button>
+        </div>
+        <button class="scale-toggle" id="pairCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartPair"></canvas></div>
+  </div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "fx";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/macro_data.js"></script>
+<script src="fx_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

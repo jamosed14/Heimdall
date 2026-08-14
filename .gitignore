@@ -1,0 +1,5 @@
+# Local-only API keys - never commit these. See fetch_macro_data.ps1 / fetch_ai_data.ps1 /
+# fetch_energy_data.ps1, which dot-source these files at fetch time. The published data/*.js
+# cache files only ever contain resulting numbers, never the keys themselves.
+fred_config.ps1
+eia_config.ps1

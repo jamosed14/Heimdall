@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Fed &amp; Liquidity</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">FED / LIQUIDITY</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">A panic, in a word, is a species of neuralgia, and according to the rules of science you must not starve it.</div>
+    <div class="quote-attribution">— Walter Bagehot</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-heading">Policy</div>
+  <div class="stat-grid" id="group-policy"></div>
+
+  <div class="section-heading">Fed Funds Futures Implied Path</div>
+  <div class="section-sub">Each point is the market-implied <span class="info-tip" data-tip="30-Day Fed Funds futures are quoted as an IMM index. Implied average EFFR for that contract month = 100 − futures price.">average EFFR</span> for that calendar month, derived from CME 30-Day Fed Funds futures (100 − futures price). This is market pricing, not exact FOMC target-rate forecasts, and it is not the full CME FedWatch meeting-probability calculation.</div>
+  <div class="stat-grid" id="group-fedpath"></div>
+
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header">
+      <div>
+        <div class="panel-title">Implied Policy Path</div>
+        <div class="panel-sub">Orange = market-implied (Fed Funds futures) · gray markers = FOMC dot plot median, where a contract month lines up with a projection year-end</div>
+      </div>
+      <div class="chart-controls">
+        <button class="scale-toggle" id="fedPathCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="fedPathChart"></canvas></div>
+  </div>
+
+  <div class="section-heading">FOMC Dot Plot <span class="freq-badge">latest SEP</span></div>
+  <div class="section-sub" id="dotPlotSub">Median of FOMC participants' year-end federal funds rate projections — the Fed's own stated expectation, conceptually distinct from market pricing above.</div>
+  <div class="stat-grid" id="group-dotplot"></div>
+
+  <div class="section-heading">Fed Balance Sheet</div>
+  <div class="section-sub">Weekly cadence (Fed H.4.1 release, Wednesday data) — 1D change isn't meaningful here, so only 1W / 1M are shown.</div>
+  <div class="stat-grid" id="group-balance"></div>
+
+  <div class="section-heading">Net Liquidity Proxy <span class="calc-badge info-tip" data-tip="Fed Total Assets − Treasury General Account − ON RRP. A commonly used shorthand for dollar system liquidity — our calculation, not an official Federal Reserve statistic.">calculated, not an official Fed figure</span></div>
+  <div class="calc-note">Fed Total Assets − Treasury General Account − ON RRP. This is our own construction for a quick read on system liquidity, not a published Federal Reserve statistic.</div>
+  <div class="stat-grid" id="group-netliq"></div>
+
+  <div class="section-heading">Charts</div>
+  <div class="chart-grid">
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Fed Total Assets</div><div class="panel-sub">Weekly, $ billions</div></div>
+        <button class="scale-toggle" id="chartAssetsCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartAssets"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Reserve Balances</div><div class="panel-sub">Weekly, $ billions</div></div>
+        <button class="scale-toggle" id="chartReservesCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartReserves"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">TGA &amp; ON RRP</div><div class="panel-sub">Treasury General Account (weekly) and ON RRP (daily), $ billions</div></div>
+        <button class="scale-toggle" id="chartTgaRrpCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartTgaRrp"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Net Liquidity Proxy</div><div class="panel-sub">Calculated · weekly, $ billions</div></div>
+        <button class="scale-toggle" id="chartNetLiqCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartNetLiq"></canvas></div>
+    </div>
+  </div>
+  <div class="range-toggle" id="rangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="1Y">1Y</button>
+    <button data-range="3Y">3Y</button>
+    <button data-range="5Y">5Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "fed";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/macro_data.js"></script>
+<script src="fed_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

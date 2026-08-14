@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — AI Buildout</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">AI CAPITAL BUILDOUT</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">People always ask me what is going on in the markets. It is simple. Greatest Speculative Bubble of All Time in All Things. By two orders of magnitude.</div>
+    <div class="quote-attribution">— Michael Burry, June 2021</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-sub" style="margin-top:-6px;">This is not an AI-stocks tracker. It monitors the physical/capital buildout behind AI: hyperscaler capital spending, semiconductor production, grid pressure, and infrastructure cost — and whether spending is outrunning the revenue supporting it.</div>
+
+  <div class="section-heading">Capital</div>
+  <div class="section-sub">Quarterly capex and revenue for MSFT, GOOGL, AMZN, META, ORCL from SEC EDGAR XBRL filings. Cash-flow figures are often filed YTD-cumulative, not standalone-quarter — Heimdall derives standalone quarters (see methodology below and the per-company tag/derivation table).</div>
+  <div class="stat-grid" id="group-capital"></div>
+  <div class="calc-note" id="capitalCalcNote"></div>
+
+  <div class="chart-grid">
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Aggregate Hyperscaler TTM Capex <span class="calc-badge">calc</span></div><div class="panel-sub">Sum of each company's own trailing-12-month capex, sampled quarterly — not a synchronized calendar sum (see methodology)</div></div>
+        <button class="scale-toggle" id="aggCapexCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="aggCapexChart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Quarterly Capex by Company</div><div class="panel-sub">Standalone-quarter capex, each company's own fiscal calendar</div></div>
+        <button class="scale-toggle" id="companyCapexCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="companyCapexChart"></canvas></div>
+    </div>
+  </div>
+  <div class="range-toggle" id="capitalRangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="1Y">1Y</button>
+    <button data-range="3Y">3Y</button>
+    <button data-range="5Y">5Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="breakdown-table-wrap">
+    <table class="breakdown-table">
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Period End</th>
+          <th>Revenue</th>
+          <th>Capex</th>
+          <th>Capex / Rev</th>
+          <th>Capex YoY</th>
+          <th>Rev YoY</th>
+        </tr>
+      </thead>
+      <tbody id="companyBreakdownBody"></tbody>
+    </table>
+  </div>
+
+  <div class="section-heading">Compute</div>
+  <div class="section-sub">Is semiconductor manufacturing responding to AI-driven demand? Broad NAICS-3344 industry data (semiconductors and other electronic components) — not AI-chip-specific, but the closest clean public read on U.S. compute production capacity.</div>
+  <div class="stat-grid" id="group-compute"></div>
+  <div class="chart-grid">
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Semiconductor Industrial Production</div><div class="panel-sub">Index 2017=100, monthly (FRED IPG3344S)</div></div>
+        <button class="scale-toggle" id="semiIPCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="semiIPChart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Semiconductor Capacity Utilization</div><div class="panel-sub">Percent, monthly (FRED CAPUTLG3344S)</div></div>
+        <button class="scale-toggle" id="semiCapUtilCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="semiCapUtilChart"></canvas></div>
+    </div>
+  </div>
+  <div class="range-toggle" id="computeRangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="1Y">1Y</button>
+    <button data-range="5Y">5Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="section-heading">Power</div>
+  <div class="section-sub">Is the grid under visible pressure? This is <strong>total U.S. electricity demand</strong> — a macro/grid proxy, not a measurement of AI/data-center electricity use specifically. Installed and planned generating capacity are not shown: EIA only exposes those at the individual-generator level (tens of thousands of rows), which doesn't fit a lightweight daily refresh — a future addition, not this version.</div>
+  <div class="stat-grid" id="group-power"></div>
+  <div class="chart-panel">
+    <div class="chart-header" style="margin-bottom:4px;">
+      <div><div class="panel-title">U.S. Electricity Demand (Retail Sales)</div><div class="panel-sub">Million kWh, monthly, all sectors (EIA)</div></div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="powerRangeToggle">
+          <button data-range="1Y">1Y</button>
+          <button data-range="5Y">5Y</button>
+          <button data-range="MAX" class="active">MAX</button>
+        </div>
+        <button class="scale-toggle" id="elecDemandCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="elecDemandChart"></canvas></div>
+  </div>
+  <div style="margin-bottom:20px;"></div>
+
+  <div class="section-heading">Infrastructure</div>
+  <div class="section-sub">Grid buildout cost pressure. These are infrastructure proxies relevant to data-center/grid construction generally — not pure AI indicators.</div>
+  <div class="stat-grid" id="group-infrastructure"></div>
+  <div class="chart-grid">
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Transformer Cost Pressure</div><div class="panel-sub">PPI, Power & Distribution Transformers Except Parts, Index Dec 1999=100 (FRED WPU11740999)</div></div>
+        <button class="scale-toggle" id="transformerCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="transformerChart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Electrical Equipment Production</div><div class="panel-sub">Index 2017=100, monthly (FRED IPG335S)</div></div>
+        <button class="scale-toggle" id="elecEquipCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="elecEquipChart"></canvas></div>
+    </div>
+  </div>
+  <div class="range-toggle" id="infraRangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="1Y">1Y</button>
+    <button data-range="5Y">5Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="section-heading">Broader Capital Cycle</div>
+  <div class="section-sub">U.S.-wide private investment in information-processing equipment and software — the whole category AI capex sits inside, not an AI-specific figure.</div>
+  <div class="stat-grid" id="group-capitalcycle"></div>
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header" style="margin-bottom:4px;">
+      <div><div class="panel-title">Private Fixed Investment: Info-Processing Equipment &amp; Software</div><div class="panel-sub">$ billions, SAAR, quarterly (FRED / BEA A679RC1Q027SBEA)</div></div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="capCycleRangeToggle">
+          <button data-range="5Y">5Y</button>
+          <button data-range="MAX" class="active">MAX</button>
+        </div>
+        <button class="scale-toggle" id="capCycleCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="capCycleChart"></canvas></div>
+  </div>
+
+  <div class="section-heading">Quarterly Watch</div>
+  <div class="section-sub">Manually-tracked items without a clean API: management capex guidance, AI/data-center debt issuance, server/GPU useful-life assumptions, depreciation-policy changes. Updated a few times a year, not automatically refreshed.</div>
+  <div id="quarterlyWatchList"></div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "ai";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/ai_data.js"></script>
+<script src="data/ai_manual.js"></script>
+<script src="ai_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

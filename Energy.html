@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Energy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">ENERGY</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">The stone age did not end for lack of stone, and the oil age will end long before the world runs out of oil.</div>
+    <div class="quote-attribution">— Sheikh Ahmed Zaki Yamani</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-heading">Headline Prices</div>
+  <div class="section-sub">EIA daily spot prices, weekday updates.</div>
+  <div class="stat-grid" id="group-prices"></div>
+
+  <div class="section-heading">Refining Economics <span class="calc-badge">calculated</span></div>
+  <div class="calc-note">Crack spreads are our calculation, not an EIA-published figure — 2 barrels gasoline + 1 barrel distillate − 3 barrels crude, per barrel. Gasoline uses LA RBOB, distillate uses NY Harbor ULSD, crude uses Cushing WTI — a regional mismatch that makes this a rough short-run margin indicator, not a precise arbitrage.</div>
+  <div class="stat-grid" id="group-cracks"></div>
+
+  <div class="section-heading">Physical Balance / Inventories</div>
+  <div class="section-sub">EIA Weekly Petroleum Status Report — whether the physical system is tightening or loosening underneath price.</div>
+  <div class="stat-grid" id="group-inventories"></div>
+
+  <div class="section-heading">Natural Gas</div>
+  <div class="section-sub">Kept separate from oil — different supply/demand dynamics.</div>
+  <div class="stat-grid" id="group-natgas"></div>
+
+  <div class="section-heading">Charts</div>
+  <div class="chart-grid">
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">WTI vs Brent</div><div class="panel-sub">Daily spot, $/bbl</div></div>
+        <button class="scale-toggle" id="chartCrudeCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartCrude"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">3:2:1 Crack Spread</div><div class="panel-sub">Calculated · $/bbl</div></div>
+        <button class="scale-toggle" id="chartCrackCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartCrack"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Crude / Gasoline / Distillate Stocks</div><div class="panel-sub">Weekly, thousand barrels</div></div>
+        <button class="scale-toggle" id="chartInvCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="chart-wrap compact"><canvas id="chartInv"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header" style="margin-bottom:4px;">
+        <div><div class="panel-title">Henry Hub &amp; Working Gas Storage</div><div class="panel-sub">Different units, so shown as two stacked panels rather than a dual-axis chart</div></div>
+        <button class="scale-toggle" id="chartGasCsvBtn">EXPORT CSV</button>
+      </div>
+      <div class="panel-sub" style="margin-bottom:4px;">Henry Hub, $/MMBtu</div>
+      <div class="chart-wrap" style="height:135px;"><canvas id="chartGasPrice"></canvas></div>
+      <div class="panel-sub" style="margin:12px 0 4px;">Working Gas in Storage, Bcf</div>
+      <div class="chart-wrap" style="height:135px;"><canvas id="chartGasStorage"></canvas></div>
+    </div>
+  </div>
+  <div class="range-toggle" id="rangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="1Y">1Y</button>
+    <button data-range="3Y">3Y</button>
+    <button data-range="5Y">5Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "energy";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/energy_data.js"></script>
+<script src="energy_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

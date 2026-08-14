@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — BTC</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left">
+    <span class="symbol">BTC / USD</span>
+    <span id="liveBtcMount"></span>
+  </div>
+  <div class="note" id="liveBtcNote">connecting…</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+    <span class="brand-sub" id="asOfLabel"></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">Bitcoin is the best idea. There is no second best.</div>
+    <div class="quote-attribution">— Michael Saylor</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">200W Moving Average</div>
+      <div class="stat-value" id="statMA">—</div>
+      <div class="stat-sub" id="statPremium">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">All-Time High</div>
+      <div class="stat-value" id="statATH">—</div>
+      <div class="stat-sub" id="statDrawdown">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Realized Vol · 30D</div>
+      <div class="stat-value" id="statVol30">—</div>
+      <div class="stat-sub">Annualized stdev of daily returns</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Realized Vol · 90D</div>
+      <div class="stat-value" id="statVol90">—</div>
+      <div class="stat-sub">Annualized stdev of daily returns</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">CME Basis</div>
+      <div class="stat-value" id="statBasis">—</div>
+      <div class="stat-sub" id="statBasisSub">—</div>
+    </div>
+  </div>
+
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div>
+        <div class="hero-label">BTC Price (cached daily close)</div>
+        <div class="hero-price" id="heroPrice">—</div>
+        <div class="hero-note"><span class="dot"></span>Dotted line = 200W moving average</div>
+      </div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="rangeToggle">
+          <button data-range="1M">1M</button>
+          <button data-range="3M">3M</button>
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y">3Y</button>
+          <button data-range="5Y">5Y</button>
+          <button data-range="MAX" class="active">MAX</button>
+        </div>
+        <button class="scale-toggle" id="logToggle">LOG</button>
+        <button class="scale-toggle" id="btcCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="btcChart"></canvas>
+    </div>
+
+    <div class="legend-row">
+      <span class="legend-item"><span class="legend-swatch price"></span>BTC Price</span>
+      <span class="legend-item"><span class="legend-swatch ma"></span>200W MA</span>
+    </div>
+  </div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "btc";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="charts.js"></script>
+<script src="data/btc_data.js"></script>
+<script src="app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>
