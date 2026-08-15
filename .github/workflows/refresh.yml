@@ -4,12 +4,26 @@ name: Nightly data refresh
 # fetch_*.ps1 scripts as local dev; FRED_API_KEY/EIA_API_KEY come from repo secrets (Settings ->
 # Secrets and variables -> Actions), never written to disk or committed. See fetch_macro_data.ps1
 # / fetch_energy_data.ps1 / fetch_ai_data.ps1 for the local-file-vs-env-var fallback logic.
+#
+# Schedule target: 9:35 AM ET (open pass, weekdays only) and 4:05 PM ET (close pass, every day
+# including weekends - BTC/GEX/CME basis genuinely have new weekend data, and the FRED/EIA/SEC
+# sources that don't are already fail-stale-safe no-ops on a day with nothing new, so there's no
+# reason to special-case a smaller weekend script list). The +5min offset from the literal
+# open/close gives auctions and most APIs time to settle without the snapshot feeling detached
+# from the actual open/close.
+#
+# GitHub Actions cron is fixed UTC and has no concept of US daylight saving, so a single cron
+# line would silently drift an hour off twice a year. Instead this fires at BOTH the EDT and EST
+# UTC equivalents of each pass, and the "Check scheduled pass" step below uses .NET's DST-aware
+# TimeZoneInfo to work out which (if either) is actually the real target time right now, skipping
+# the rest of the job otherwise - exact year-round, not a seasonal approximation.
 
 on:
   schedule:
-    # 06:00 UTC daily - comfortably after UTC midnight so blockchain.info's prior-day close and
-    # other daily sources have published, independent of any single timezone.
-    - cron: "0 6 * * *"
+    - cron: "35 13 * * *"  # 9:35 AM ET during EDT (UTC-4)
+    - cron: "35 14 * * *"  # 9:35 AM ET during EST (UTC-5)
+    - cron: "5 20 * * *"   # 4:05 PM ET during EDT (UTC-4)
+    - cron: "5 21 * * *"   # 4:05 PM ET during EST (UTC-5)
   workflow_dispatch: {}
 
 permissions:
@@ -21,6 +35,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A manual workflow_dispatch run always proceeds regardless of clock time; only the
+      # scheduled cron firings (4 per day, only 2 of which are ever the "real" ET time on any
+      # given day) get gated by this check.
+      - name: Check scheduled pass
+        id: gate
+        if: github.event_name == 'schedule'
+        shell: pwsh
+        run: |
+          # Runner is ubuntu-latest, which resolves IANA IDs via ICU - "Eastern Standard Time"
+          # (the Windows name for the whole US Eastern zone, DST-aware despite the name) is a
+          # defensive fallback in case that ever changes, not the expected path.
+          try {
+            $etTz = [System.TimeZoneInfo]::FindSystemTimeZoneById("America/New_York")
+          } catch {
+            $etTz = [System.TimeZoneInfo]::FindSystemTimeZoneById("Eastern Standard Time")
+          }
+          $etNow = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $etTz)
+          $isWeekday = $etNow.DayOfWeek -ne [System.DayOfWeek]::Saturday -and $etNow.DayOfWeek -ne [System.DayOfWeek]::Sunday
+          $isOpenWindow = ($etNow.Hour -eq 9 -and $etNow.Minute -ge 30 -and $etNow.Minute -le 40)
+          $isCloseWindow = ($etNow.Hour -eq 16 -and $etNow.Minute -ge 0 -and $etNow.Minute -le 10)
+          $shouldRun = ($isOpenWindow -and $isWeekday) -or $isCloseWindow
+          Write-Host ("ET now: {0} ({1}) - open window: {2}, close window: {3}, weekday: {4} -> shouldRun: {5}" -f `
+            $etNow.ToString("yyyy-MM-dd HH:mm"), $etNow.DayOfWeek, $isOpenWindow, $isCloseWindow, $isWeekday, $shouldRun)
+          "shouldRun=$($shouldRun.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       # Source isolation: each fetch script runs in its own try/catch so one failing (e.g. SEC
       # EDGAR blocking this runner's IP) never prevents the others from updating. Each script
       # already guarantees it never writes corrupted output itself (validate-before-overwrite +
@@ -28,6 +67,7 @@ jobs:
       # keep going past a failure and log it loudly, not to protect file integrity itself.
       - name: Run fetch scripts
         id: fetch
+        if: github.event_name != 'schedule' || steps.gate.outputs.shouldRun == 'true'
         shell: pwsh
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
