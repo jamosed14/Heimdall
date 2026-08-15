@@ -47,6 +47,18 @@
     }
   }
 
+  var MIRROR_CLASS = "btc-live-mirror";
+
+  // Any element tagged with MIRROR_CLASS anywhere on the page (e.g. a stat tile, a
+  // Summary-tab row) mirrors the same live price as the header ticker - single source of
+  // truth, no per-page polling/parsing duplication. Only ever called with a validated
+  // price, so this never blanks a mirror; a page that has no valid price yet (no cache,
+  // first poll still failing) just keeps whatever fallback it was rendered with.
+  function mirrorPrice(px) {
+    var mirrors = document.getElementsByClassName(MIRROR_CLASS);
+    for (var i = 0; i < mirrors.length; i++) mirrors[i].textContent = fmtUsd(px);
+  }
+
   var inFlight = false;
   var BASE_INTERVAL = 45000;
   var MAX_INTERVAL = 5 * 60000; // cap backoff at 5 min so it still recovers on its own
@@ -86,6 +98,7 @@
         if (!isValidPrice(px)) throw new Error("invalid price payload");
 
         priceEl.textContent = fmtUsd(px);
+        mirrorPrice(px);
         if (noteEl) noteEl.textContent = "live · updated " + new Date().toLocaleTimeString();
         writeCachedPrice(px);
         consecutiveFailures = 0;
@@ -109,6 +122,8 @@
     var initialPrice = cached ? fmtUsd(cached.price) : "—";
     mount.innerHTML =
       '<span class="live-price">' + ICON_SVG + '<span class="live-dot"></span><span id="liveBtcPrice">' + initialPrice + '</span></span>';
+
+    if (cached) mirrorPrice(cached.price);
 
     // liveBtcNote is a pre-existing static element on some pages (not created here) -
     // only touch it if present, same as poll() already does.

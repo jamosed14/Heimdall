@@ -103,7 +103,7 @@
     var btcStats = (BTC && BTC.stats) || {};
     html += '<div class="summary-block">' + blockHeader("Bitcoin", "BTC.html");
     var btcObsInfo = { obsDate: BTC ? BTC.asOfDate : null, freq: "daily", generatedAtUtc: BTC ? BTC.generatedAtUtc : null };
-    html += row("BTC / USD", '<span id="sumBtcPrice">' + fmtUsd(btcStats.price) + "</span>", null, 0, btcObsInfo);
+    html += row("BTC / USD", '<span id="sumBtcPrice" class="btc-live-mirror">' + fmtUsd(btcStats.price) + "</span>", null, 0, btcObsInfo);
     var premiumChg = btcStats.premiumPct;
     var premiumLabel = premiumChg === null || premiumChg === undefined ? "—" :
       fmtPct(premiumChg) + (premiumChg >= 0 ? " premium" : " discount");
