@@ -9,9 +9,9 @@
     { key: "fed", label: "Fed & Liquidity", href: "Fed & Liquidity.html" },
     { key: "inflation", label: "Inflation", href: "Inflation.html" },
     { key: "fx", label: "Dollar & FX", href: "Dollar & FX.html" },
+    { key: "credit", label: "Credit", href: "Credit.html" },
     { key: "energy", label: "Energy", href: "Energy.html" },
-    { key: "ai", label: "AI Buildout", href: "AI.html" },
-    { key: "credit", label: "Credit", href: "Credit.html" }
+    { key: "ai", label: "AI Buildout", href: "AI.html" }
   ];
 
   var mount = document.getElementById("nav");
