@@ -323,6 +323,22 @@ html, body {
   gap: 16px;
   margin-bottom: 18px;
 }
+/* Without min-width:0, a flex item with long wrapping text (e.g. a long panel-sub) can claim
+   the container's full width instead of wrapping within its own share of it, pushing the
+   controls/button sibling onto its own line and inflating that panel's header height relative
+   to a neighboring panel with shorter text - the two panels then visibly misalign even though
+   both start at the same grid-row top. */
+.chart-header > div:first-child {
+  /* flex-basis:0 (not auto) - with auto, the browser still factors the text's unwrapped
+     max-content width into the row's wrap decision, so a long subtitle alone can force the
+     button onto its own line even with min-width:0 letting it shrink afterward. */
+  flex: 1 1 0;
+  min-width: 0;
+}
+.chart-header > .scale-toggle,
+.chart-header > .chart-controls {
+  flex-shrink: 0;
+}
 
 .chart-header .hero-price {
   font-family: var(--font-mono);
@@ -527,6 +543,8 @@ html, body {
 .chart-panel .panel-sub {
   font-size: 13px;
   color: var(--text-muted);
+  line-height: 1.4;
+  min-height: 2.8em;
   margin-bottom: 14px;
 }
 
