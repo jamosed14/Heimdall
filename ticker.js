@@ -59,6 +59,17 @@
     for (var i = 0; i < mirrors.length; i++) mirrors[i].textContent = fmtUsd(px);
   }
 
+  // Applies an already-validated price to the header + every mirror on this page, with a
+  // note describing where it came from ("live" for this tab's own fetch, "synced" for a
+  // price pushed in from another open Heimdall tab via the storage event below).
+  function applyPrice(px, noteLabel, atTime) {
+    var priceEl = document.getElementById("liveBtcPrice");
+    if (priceEl) priceEl.textContent = fmtUsd(px);
+    mirrorPrice(px);
+    var noteEl = document.getElementById("liveBtcNote");
+    if (noteEl) noteEl.textContent = noteLabel + " · updated " + atTime.toLocaleTimeString();
+  }
+
   var inFlight = false;
   var BASE_INTERVAL = 45000;
   var MAX_INTERVAL = 5 * 60000; // cap backoff at 5 min so it still recovers on its own
@@ -97,9 +108,7 @@
         // price stays on screen exactly as if the fetch had failed outright.
         if (!isValidPrice(px)) throw new Error("invalid price payload");
 
-        priceEl.textContent = fmtUsd(px);
-        mirrorPrice(px);
-        if (noteEl) noteEl.textContent = "live · updated " + new Date().toLocaleTimeString();
+        applyPrice(px, "live", new Date());
         writeCachedPrice(px);
         consecutiveFailures = 0;
       })
@@ -130,6 +139,23 @@
     var noteEl0 = document.getElementById("liveBtcNote");
     if (noteEl0 && cached) noteEl0.textContent = "last known · " + new Date(cached.ts).toLocaleTimeString();
   }
+
+  // Cross-tab sync: each open tab runs its own independent poll timer, so two Heimdall tabs
+  // open side by side can visibly lag each other by up to a full poll interval even though
+  // they're both "live." localStorage writes fire a native `storage` event in every OTHER
+  // open tab on the same origin (never the tab that wrote it) - the instant one tab's poll
+  // succeeds, every other open tab picks up that price immediately instead of waiting out
+  // its own timer, so they stay in visible lockstep.
+  window.addEventListener("storage", function (e) {
+    if (e.key !== CACHE_KEY || !e.newValue) return;
+    try {
+      var updated = JSON.parse(e.newValue);
+      if (!updated || !isValidPrice(updated.price)) return;
+      applyPrice(updated.price, "synced", new Date(updated.ts));
+    } catch (err) {
+      // malformed cross-tab payload - ignore, this tab's own poll cycle is still running.
+    }
+  });
 
   poll();
 })();
