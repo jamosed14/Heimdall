@@ -49,6 +49,17 @@
   }
 
   var inFlight = false;
+  var BASE_INTERVAL = 45000;
+  var MAX_INTERVAL = 5 * 60000; // cap backoff at 5 min so it still recovers on its own
+  var consecutiveFailures = 0;
+  var pollTimer = null;
+
+  function scheduleNext() {
+    var delay = consecutiveFailures > 0
+      ? Math.min(BASE_INTERVAL * Math.pow(2, consecutiveFailures), MAX_INTERVAL)
+      : BASE_INTERVAL;
+    pollTimer = setTimeout(poll, delay);
+  }
 
   function poll() {
     var priceEl = document.getElementById("liveBtcPrice");
@@ -85,15 +96,18 @@
         }
         if (noteEl) noteEl.textContent = "live · updated " + new Date().toLocaleTimeString();
         writeCachedPrice(px, chg);
+        consecutiveFailures = 0;
       })
       .catch(function () {
         // Fetch failed, timed out, or returned malformed data - retain whatever price
         // is already on screen. Never blank, zero, or clear it here.
         if (noteEl) noteEl.textContent = "live price unavailable";
+        consecutiveFailures++;
       })
       .finally(function () {
         if (timeoutId) clearTimeout(timeoutId);
         inFlight = false;
+        scheduleNext();
       });
   }
 
@@ -118,5 +132,4 @@
   }
 
   poll();
-  setInterval(poll, 45000);
 })();
