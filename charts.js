@@ -111,6 +111,12 @@ window.HeimdallCharts = (function () {
                 font: { size: 13 },
                 maxTicksLimit: 8,
                 autoSkip: true,
+                // bounds:"data" clips the axis to the real data extent, which often leaves the
+                // final tick interval shorter than the rest (evenly-spaced ticks minus whatever
+                // partial step remains before the true data max) - without enough autoSkip
+                // buffer, that compressed last gap renders two labels overlapping instead of
+                // one being dropped. Default padding (3px) isn't enough for this monospace font.
+                autoSkipPadding: 24,
                 callback: function (value) { return fmtAxisDate(value); }
               }
             },
