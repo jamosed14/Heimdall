@@ -10,6 +10,12 @@
     var bps = Math.round(delta * 100);
     return (bps > 0 ? "+" : "") + bps + "bp";
   }
+  // Spreads are small percentage-point deltas (0.48 = 48bp) - basis points is the unit
+  // this desk actually thinks in, a "%" reading is just noise at this magnitude.
+  function fmtBpsValue(v) {
+    if (v === null || v === undefined) return "—";
+    return Math.round(v * 100) + "bp";
+  }
   function buildChip(tag, text, val) {
     if (text === null) return "";
     var cls = "chg-chip" + (val > 0 ? " positive" : val < 0 ? " negative" : "");
@@ -25,9 +31,9 @@
     { key: "real10", label: "10Y Real Yield (TIPS)" }
   ];
   var SPREADS = [
-    { key: "spread2s10", label: "2s10s Spread" },
-    { key: "spread3m10", label: "3M10Y Spread" },
-    { key: "spread5s30", label: "5s30s Spread" }
+    { key: "spread2s10", label: "2s10s Spread", unit: "bp" },
+    { key: "spread3m10", label: "3M10Y Spread", unit: "bp" },
+    { key: "spread5s30", label: "5s30s Spread", unit: "bp" }
   ];
 
   function renderCard(metric) {
@@ -41,9 +47,10 @@
     var chips = buildChip("1D", fmtBpsChip(stat.chg1d), stat.chg1d) +
       buildChip("1W", fmtBpsChip(stat.chg1w), stat.chg1w) +
       buildChip("1M", fmtBpsChip(stat.chg1m), stat.chg1m);
+    var valueText = metric.unit === "bp" ? fmtBpsValue(stat.value) : fmtPct(stat.value);
     card.innerHTML =
       '<div class="stat-label">' + metric.label + '</div>' +
-      '<div class="stat-value">' + fmtPct(stat.value) + '</div>' +
+      '<div class="stat-value">' + valueText + '</div>' +
       '<div class="chg-row">' + chips + '</div>';
     if (window.HeimdallFormat) {
       window.HeimdallFormat.applyTooltip(card.querySelector(".stat-label"), stat.asOfDate, stat.freq, DATA.generatedAtUtc);
