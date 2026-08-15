@@ -23,4 +23,41 @@
     var cls = p.key === current ? ' class="active"' : "";
     return '<a href="' + p.href.replace(/&/g, "&amp;") + '"' + cls + ">" + p.label + "</a>";
   }).join("");
+
+  // ---------- Keyboard nav: Left/Right steps tabs, Home jumps Summary, B jumps BTC ----------
+  function isTypingTarget(el) {
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    var tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON";
+  }
+
+  function goTo(key) {
+    for (var i = 0; i < PAGES.length; i++) {
+      if (PAGES[i].key === key) { window.location.href = PAGES[i].href; return; }
+    }
+  }
+
+  document.addEventListener("keydown", function (e) {
+    // Never hijack a browser/OS shortcut (Ctrl+B, Alt+Left, etc.) or a key repeat from
+    // holding the key down, and never fire while focus is somewhere that key would
+    // legitimately mean something else (typing in a field, activating a button).
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    if (isTypingTarget(document.activeElement)) return;
+
+    var idx = -1;
+    for (var i = 0; i < PAGES.length; i++) { if (PAGES[i].key === current) { idx = i; break; } }
+
+    if (e.key === "ArrowLeft") {
+      if (idx > 0) { e.preventDefault(); window.location.href = PAGES[idx - 1].href; }
+    } else if (e.key === "ArrowRight") {
+      if (idx >= 0 && idx < PAGES.length - 1) { e.preventDefault(); window.location.href = PAGES[idx + 1].href; }
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      goTo("summary");
+    } else if (e.key === "b" || e.key === "B") {
+      e.preventDefault();
+      goTo("btc");
+    }
+  });
 })();
