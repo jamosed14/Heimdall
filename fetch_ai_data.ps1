@@ -268,6 +268,18 @@ foreach ($ticker in $COMPANIES.Keys) {
         $latestRevQ.End, $latestRevQ.Value, $revConcept.tag, $latestCapexQ.End, $latestCapexQ.Value, $capexConcept.tag, $revQ.Count, $capexQ.Count)
 }
 
+# Refuse to publish a broken "aggregate" - if SEC EDGAR is unreachable/blocking this run
+# (observed: works fine from a local machine, returns nothing from a GitHub Actions runner IP,
+# most likely SEC rate-limiting/blocking shared cloud IP ranges) every company gets skipped
+# above and $companyResults would be empty. Throwing here, before any output is written, means
+# the existing data\ai_data.js (last known-good) is left untouched rather than overwritten with
+# a $0/"0 companies" aggregate - this is the standing Heimdall rule ("never silently replace
+# missing data with zero, preserve last-known-good data") applied to a total-outage case that
+# per-company skip handling alone didn't cover.
+if ($companyResults.Count -lt $COMPANIES.Count) {
+    throw ("Only {0} of {1} companies resolved from SEC EDGAR - refusing to write a partial/broken aggregate. Leaving existing data\ai_data.js untouched. This usually means SEC EDGAR rejected/rate-limited requests from this machine's IP - works reliably from a residential/local IP, has failed from GitHub Actions runners." -f $companyResults.Count, $COMPANIES.Count)
+}
+
 # ---- Aggregate across companies: each company's own latest quarter / own TTM, summed.
 # Not calendar-synchronized (MSFT/ORCL fiscal quarters don't align to calendar quarters) -
 # the per-company breakdown above preserves each company's actual period-end date so this
