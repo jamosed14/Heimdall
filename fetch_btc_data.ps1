@@ -4,7 +4,7 @@
 #
 # Data-integrity model (see fetch_common.ps1): the raw daily price series is validated and
 # merged with the existing cached series by date before anything is derived from it - a
-# truncated/empty/malformed blockchain.info response falls back to last known-good history
+# truncated/empty/malformed Coinbase response falls back to last known-good history
 # rather than recomputing MA/ATH/vol from bad or partial data. CME basis (a live snapshot, not
 # a history series) falls back to its last cached value on failure rather than going blank.
 
@@ -25,32 +25,55 @@ $existingPriceSeries = if ($existingPayload) {
     , ($existingPayload.series | ForEach-Object { [PSCustomObject]@{ Date = $_.d; Value = [double]$_.p } })
 } else { @() }
 
-Write-Output "Fetching BTC price history..."
+Write-Output "Fetching BTC price history from Coinbase..."
 $freshPriceSeries = @()
 try {
-    $resp = Invoke-RestMethod -Uri "https://api.blockchain.info/charts/market-price?timespan=all&format=json&sampled=false" -UseBasicParsing -TimeoutSec 30
-    $rawVals = $resp.values | Sort-Object x
-    $startIdx = 0
-    for ($i = 0; $i -lt $rawVals.Count; $i++) { if ($rawVals[$i].y -gt 0) { $startIdx = $i; break } }
-    $list = New-Object System.Collections.Generic.List[object]
-    for ($i = $startIdx; $i -lt $rawVals.Count; $i++) {
-        $d = [DateTimeOffset]::FromUnixTimeSeconds([int64]$rawVals[$i].x).UtcDateTime.Date
-        $list.Add([PSCustomObject]@{ Date = $d.ToString("yyyy-MM-dd"); Value = [double]$rawVals[$i].y })
+    # Coinbase Exchange public candles endpoint: no key needed, but caps at 300 candles per
+    # request, so a decade-plus of daily history has to be paginated in ~300-day windows.
+    # Data doesn't exist before BTC-USD was listed (empty array for pre-listing ranges, not
+    # an error) - starting from 2015-01-01 safely covers that with harmless empty responses.
+    $byDate = [ordered]@{}
+    $cursor = [DateTime]::Parse("2015-01-01")
+    $endDate = (Get-Date).ToUniversalTime().Date
+    while ($cursor -le $endDate) {
+        $chunkEnd = $cursor.AddDays(299)
+        if ($chunkEnd -gt $endDate) { $chunkEnd = $endDate }
+        $uri = "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start={0}&end={1}" -f `
+            $cursor.ToString("yyyy-MM-dd"), $chunkEnd.ToString("yyyy-MM-dd")
+        $rows = Invoke-RestMethod -Uri $uri -Headers @{ "User-Agent" = "Heimdall Catallaxy (jamosed14@gmail.com)" } -TimeoutSec 30
+        foreach ($row in $rows) {
+            # row = [ time, low, high, open, close, volume ]
+            $d = [DateTimeOffset]::FromUnixTimeSeconds([int64]$row[0]).UtcDateTime.Date
+            $byDate[$d.ToString("yyyy-MM-dd")] = [double]$row[4]
+        }
+        $cursor = $chunkEnd.AddDays(1)
+        Start-Sleep -Milliseconds 200
     }
-    # NOTE: no leading comma here - "return , (...)" is the correct idiom to stop a function
-    # from unrolling its return value, but that same comma on a plain variable assignment
-    # double-wraps the array instead (confirmed: produced a 1-element array whose only element
-    # was the real 5842-item array). Direct assignment doesn't need it.
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($k in ($byDate.Keys | Sort-Object)) { $list.Add([PSCustomObject]@{ Date = $k; Value = $byDate[$k] }) }
+    # See note elsewhere in this file on why a plain assignment must not use a leading comma.
     $freshPriceSeries = $list | Sort-Object Date
 } catch {
-    Write-Host ("::error::blockchain.info fetch failed: {0}" -f $_.Exception.Message)
+    Write-Host ("::error::Coinbase fetch failed: {0}" -f $_.Exception.Message)
 }
 
-# blockchain.info history runs back to 2010 - thousands of points expected. 500 is a
+# Coinbase BTC-USD listing runs back to ~2016 - thousands of points expected. 500 is a
 # conservative floor that catches a truncated/broken response without being trigger-happy.
-$priceResult = Get-ValidatedMergedSeries -Fresh $freshPriceSeries -Existing $existingPriceSeries -MinCount 500 -Name "btc-price"
+$priceResult = Get-ValidatedMergedSeries -Fresh $freshPriceSeries -Existing $existingPriceSeries -MinCount 500 -Name "btc-price-coinbase"
 if ($priceResult.series.Count -eq 0) {
     throw "No usable BTC price data (fresh fetch invalid and no existing cache) - refusing to write data\btc_data.js."
+}
+
+# The existing cache predates this source switch and still carries pre-2016 dates from the old
+# blockchain.info series (before Coinbase's BTC-USD listing). Merge-SeriesByDate's fail-stale
+# fallback can't tell "Coinbase genuinely has no data this old" apart from "fetch failed" - both
+# just look like a missing date in the fresh response. When today's fresh fetch actually
+# succeeded, trim the merged result back to Coinbase's own earliest real date so the series is
+# cleanly one vendor throughout, not a blend. Skip this when the fresh fetch itself failed
+# (status "stale") - that's a real outage and should keep the full existing fallback as-is.
+if ($priceResult.status -eq "ok" -and $freshPriceSeries.Count -gt 0) {
+    $coinbaseMinDate = $freshPriceSeries[0].Date
+    $priceResult.series = $priceResult.series | Where-Object { $_.Date -ge $coinbaseMinDate }
 }
 Write-Output ("  btc-price: {0} pts, {1} to {2} [{3}]" -f $priceResult.series.Count, $priceResult.series[0].Date, $priceResult.series[-1].Date, $priceResult.status)
 
@@ -219,7 +242,7 @@ $payload = @{
     generatedAtUtc        = $nowUtc
     lastSuccessfulRefresh = $nowUtc
     lastObservation       = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
-    sourceStatus          = @{ blockchainInfo = $priceResult.status; cmeBasis = $cmeBasisStatus }
+    sourceStatus          = @{ coinbase = $priceResult.status; cmeBasis = $cmeBasisStatus }
     asOfDate              = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
     series                = $series
     stats                 = @{

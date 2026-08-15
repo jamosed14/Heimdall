@@ -40,7 +40,7 @@
     document.getElementById("asOfLabel").textContent = "as of " + DATA.asOfDate + " (UTC daily close)";
     document.getElementById("heroPrice").textContent = fmtUsd(s.price);
     document.getElementById("generatedNote").textContent =
-      "Data cached " + DATA.generatedAtUtc + " · source: blockchain.info daily close, computed locally";
+      "Data cached " + DATA.generatedAtUtc + " · source: Coinbase daily close, computed locally";
 
     document.getElementById("statMA").textContent = fmtUsd(s.ma200w);
     var premiumEl = document.getElementById("statPremium");
@@ -114,7 +114,50 @@
     });
   }
 
+  // ---------- Live-derived premium/discount and drawdown ----------
+  // The 200W MA and ATH are fixed reference levels from the cached Coinbase history (updated
+  // nightly). The live BTC price - rendered by ticker.js into #liveBtcPrice - moves throughout
+  // the day, so premium/discount and drawdown-from-ATH are recomputed against it live rather
+  // than frozen at the last cache refresh. ticker.js itself is untouched; this only observes
+  // the DOM it already renders.
+  function parseLivePrice(text) {
+    if (!text) return null;
+    var n = parseFloat(text.replace(/[^0-9.\-]/g, ""));
+    return (isFinite(n) && n > 0) ? n : null;
+  }
+
+  function updateLiveDerivedStats() {
+    var livePrice = parseLivePrice(document.getElementById("liveBtcPrice") ? document.getElementById("liveBtcPrice").textContent : null);
+    // No valid live price yet (still connecting, or ticker fetch failing) - fail stale:
+    // leave whatever premium/drawdown value is already on screen untouched, never blank it.
+    if (livePrice === null) return;
+
+    var s = DATA.stats;
+    if (s.ma200w) {
+      var premiumEl = document.getElementById("statPremium");
+      var pct = ((livePrice - s.ma200w) / s.ma200w) * 100;
+      premiumEl.textContent = (pct >= 0 ? fmtPct(pct) + " premium" : fmtPct(pct) + " discount");
+      setSubClass(premiumEl, pct);
+    }
+    if (s.athPrice) {
+      var ddEl = document.getElementById("statDrawdown");
+      var dd = ((livePrice - s.athPrice) / s.athPrice) * 100;
+      // Live price can pass the cached ATH intraday, before the next nightly refresh updates
+      // it - a positive "drawdown" would be nonsensical, so treat that as a fresh high (0%).
+      if (dd > 0) dd = 0;
+      ddEl.textContent = fmtPct(dd) + " from ATH (" + s.athDate + ")";
+      setSubClass(ddEl, dd);
+    }
+  }
+
+  var liveBtcMount = document.getElementById("liveBtcMount");
+  if (liveBtcMount && window.MutationObserver) {
+    new MutationObserver(updateLiveDerivedStats)
+      .observe(liveBtcMount, { childList: true, subtree: true, characterData: true });
+  }
+
   renderStats();
   buildChart();
+  updateLiveDerivedStats();
   // Live ticker is handled by the shared ticker.js, included after this script.
 })();
