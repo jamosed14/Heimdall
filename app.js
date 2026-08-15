@@ -22,6 +22,16 @@
     return (bps > 0 ? "+" : "") + bps + "bp";
   }
 
+  function fmtUsdScale(n) {
+    if (n === null || n === undefined) return "—";
+    var sign = n < 0 ? "-" : "";
+    var abs = Math.abs(n);
+    if (abs >= 1e9) return sign + "$" + (abs / 1e9).toFixed(2) + "B";
+    if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(1) + "M";
+    if (abs >= 1e3) return sign + "$" + (abs / 1e3).toFixed(0) + "K";
+    return sign + "$" + abs.toFixed(0);
+  }
+
   function setSubClass(el, value) {
     el.classList.remove("positive", "negative");
     if (value > 0) el.classList.add("positive");
@@ -162,8 +172,115 @@
       .observe(liveBtcMount, { childList: true, subtree: true, characterData: true });
   }
 
+  // ---------- Dealer Gamma Exposure (estimated, not observed) ----------
+  var GEX_METHODOLOGY_TIP =
+    "Estimated from Deribit's public BTC options open interest and mark IV using Black-Scholes " +
+    "gamma. Follows the standard public-data convention (dealers assumed net long calls, net " +
+    "short puts) used by SqueezeMetrics/SpotGamma-style calculators - not observed dealer " +
+    "positioning, since no venue discloses actual dealer books.";
+
+  function renderGex() {
+    var G = window.GEX_DATA;
+    var netEl = document.getElementById("gexNet");
+    if (!netEl) return; // section not present on this page build
+    if (!G) {
+      document.getElementById("gexGeneratedNote").textContent = "no cached data — run fetch_gex_data.ps1";
+      return;
+    }
+
+    netEl.textContent = fmtUsdScale(G.netGexUsd) + " / 1%";
+    setSubClass(netEl, G.netGexUsd);
+
+    var regimeEl = document.getElementById("gexRegime");
+    if (G.netGexUsd > 0) {
+      regimeEl.textContent = "dealers net long gamma (stabilizing)";
+    } else if (G.netGexUsd < 0) {
+      regimeEl.textContent = "dealers net short gamma (amplifying)";
+    } else {
+      regimeEl.textContent = "—";
+    }
+
+    document.getElementById("gexCallOi").textContent = G.totalCallOiBtc.toLocaleString("en-US", { maximumFractionDigits: 0 }) + " BTC";
+    document.getElementById("gexPutOi").textContent = G.totalPutOiBtc.toLocaleString("en-US", { maximumFractionDigits: 0 }) + " BTC";
+    document.getElementById("gexPcRatio").textContent = G.putCallOiRatio === null ? "—" : G.putCallOiRatio.toFixed(2);
+
+    document.getElementById("gexGeneratedNote").textContent =
+      "GEX snapshot cached " + G.generatedAtUtc + " · source: Deribit options chain (" + G.instrumentsUsed + " instruments), computed locally · estimate, not observed dealer positioning";
+
+    // Pre-seed the calc-methodology tooltip on Net GEX's label before appending the standard
+    // observation/checked note, same pattern as the Net Liquidity Proxy on the Fed tab.
+    var netLabel = netEl.closest(".stat-card").querySelector(".stat-label");
+    if (netLabel && window.HeimdallFormat) {
+      var span = document.createElement("span");
+      span.className = "info-tip";
+      span.setAttribute("data-tip", GEX_METHODOLOGY_TIP);
+      span.innerHTML = netLabel.innerHTML;
+      netLabel.innerHTML = "";
+      netLabel.appendChild(span);
+      window.HeimdallFormat.applyTooltip(netLabel, G.asOfUtc.slice(0, 10), "daily", G.generatedAtUtc);
+    }
+  }
+
+  function buildGexChart() {
+    var G = window.GEX_DATA;
+    var canvas = document.getElementById("gexChart");
+    if (!canvas || !G) return;
+    if (!G.byStrike || G.byStrike.length < 2) {
+      var wrap = canvas.closest(".chart-wrap");
+      if (wrap) wrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-faint);font-size:13px;font-style:italic;">Insufficient data to render this chart</div>';
+      return;
+    }
+
+    var labels = G.byStrike.map(function (p) { return p.k; });
+    var values = G.byStrike.map(function (p) { return p.net; });
+    var colors = values.map(function (v) { return v >= 0 ? "#7fae55" : "#c0574a"; });
+
+    new Chart(canvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, barPercentage: 1.0, categoryPercentage: 0.9 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#1c170f", borderColor: "#443a29", borderWidth: 1,
+            titleColor: "#c7b9a0", bodyColor: "#f5f1e6", titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10,
+            callbacks: {
+              title: function (items) { return "Strike $" + Number(items[0].label).toLocaleString("en-US"); },
+              label: function (item) { return "Net GEX: " + fmtUsdScale(item.parsed.y) + " / 1%"; }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            border: { color: "#2c2620" },
+            ticks: {
+              color: "#9c8f76", font: { size: 11 }, maxTicksLimit: 12, autoSkip: true,
+              callback: function (value) {
+                var k = Number(labels[value]);
+                return k >= 1000 ? "$" + Math.round(k / 1000) + "k" : "$" + k;
+              }
+            }
+          },
+          y: {
+            grid: { color: "#1a160f" },
+            border: { color: "#2c2620" },
+            ticks: { color: "#9c8f76", font: { size: 12 }, callback: function (v) { return fmtUsdScale(v); } }
+          }
+        }
+      }
+    });
+  }
+
   renderStats();
   buildChart();
   updateLiveDerivedStats();
+  renderGex();
+  buildGexChart();
   // Live ticker is handled by the shared ticker.js, included after this script.
 })();

@@ -33,7 +33,7 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
         run: |
-          $scripts = @("fetch_btc_data.ps1", "fetch_macro_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1", "fetch_credit_data.ps1")
+          $scripts = @("fetch_btc_data.ps1", "fetch_macro_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1", "fetch_credit_data.ps1", "fetch_gex_data.ps1")
           $failed = @()
           foreach ($script in $scripts) {
             Write-Host "::group::Running $script"

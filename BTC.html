@@ -88,6 +88,46 @@
     </div>
   </div>
 
+  <div class="section-heading">Dealer Gamma Exposure <span class="calc-badge">calc</span></div>
+  <div class="section-sub">Estimated from Deribit's public BTC options open interest, not observed dealer positioning — see tooltip for methodology.</div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Net GEX</div>
+      <div class="stat-value" id="gexNet">—</div>
+      <div class="stat-sub" id="gexRegime">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Call OI</div>
+      <div class="stat-value" id="gexCallOi">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Put OI</div>
+      <div class="stat-value" id="gexPutOi">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Put/Call OI Ratio</div>
+      <div class="stat-value" id="gexPcRatio">—</div>
+    </div>
+  </div>
+
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div>
+        <div class="hero-label">Net GEX by Strike</div>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="gexChart"></canvas>
+    </div>
+    <div class="legend-row">
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--positive)"></span>Dealers long gamma (stabilizing)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--negative)"></span>Dealers short gamma (amplifying)</span>
+    </div>
+  </div>
+
+  <div class="footer-note" id="gexGeneratedNote"></div>
+
   <div class="footer-note" id="generatedNote"></div>
 </div>
 
@@ -97,6 +137,7 @@
 <script src="vendor/chart.umd.min.js"></script>
 <script src="charts.js"></script>
 <script src="data/btc_data.js"></script>
+<script src="data/gex_data.js"></script>
 <script src="app.js"></script>
 <script src="ticker.js"></script>
 </body>
