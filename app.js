@@ -16,6 +16,12 @@
     return sign + n.toFixed(opts.digits === undefined ? 2 : opts.digits) + "%";
   }
 
+  function fmtBps(n) {
+    if (n === null || n === undefined) return "—";
+    var bps = Math.round(n * 100);
+    return (bps > 0 ? "+" : "") + bps + "bp";
+  }
+
   function setSubClass(el, value) {
     el.classList.remove("positive", "negative");
     if (value > 0) el.classList.add("positive");
@@ -65,7 +71,7 @@
       basisSubEl.textContent = "unavailable this refresh";
     } else {
       var basisDisplay = b.annualizedBasisPct !== null ? b.annualizedBasisPct : b.rawBasisPct;
-      basisEl.textContent = fmtPct(basisDisplay, { digits: 2 }) + (b.annualizedBasisPct !== null ? " ann." : " raw");
+      basisEl.textContent = fmtBps(basisDisplay) + (b.annualizedBasisPct !== null ? " ann." : " raw");
       setSubClass(basisEl, basisDisplay);
       var expiryNote = b.daysToExpiry !== null ? b.daysToExpiry + "d to expiry" : "";
       var niceLabel = b.contractLabel.replace(",", ", ");
