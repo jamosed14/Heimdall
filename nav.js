@@ -10,7 +10,8 @@
     { key: "inflation", label: "Inflation", href: "Inflation.html" },
     { key: "fx", label: "Dollar & FX", href: "Dollar & FX.html" },
     { key: "energy", label: "Energy", href: "Energy.html" },
-    { key: "ai", label: "AI Buildout", href: "AI.html" }
+    { key: "ai", label: "AI Buildout", href: "AI.html" },
+    { key: "credit", label: "Credit", href: "Credit.html" }
   ];
 
   var mount = document.getElementById("nav");

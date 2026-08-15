@@ -10,3 +10,5 @@ Write-Output "---"
 & (Join-Path $root "fetch_energy_data.ps1")
 Write-Output "---"
 & (Join-Path $root "fetch_ai_data.ps1")
+Write-Output "---"
+& (Join-Path $root "fetch_credit_data.ps1")

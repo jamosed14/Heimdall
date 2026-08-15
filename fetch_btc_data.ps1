@@ -1,32 +1,60 @@
 # Pulls full BTC daily price history, computes 200W MA / premium-discount / ATH / drawdown /
 # realized vol, and writes data\btc_data.js for the dashboard to read (avoids file:// fetch/CORS
 # issues by loading as a <script> tag instead of via fetch()).
+#
+# Data-integrity model (see fetch_common.ps1): the raw daily price series is validated and
+# merged with the existing cached series by date before anything is derived from it - a
+# truncated/empty/malformed blockchain.info response falls back to last known-good history
+# rather than recomputing MA/ATH/vol from bad or partial data. CME basis (a live snapshot, not
+# a history series) falls back to its last cached value on failure rather than going blank.
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root "fetch_common.ps1")
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
+$outPath = Join-Path $dataDir "btc_data.js"
+
+$existingPayload = Get-ExistingPayload $outPath
+if ($existingPayload) { Write-Output ("Existing cache found: generated {0}" -f $existingPayload.generatedAtUtc) }
+else { Write-Output "No existing cache found (first run, or previous file unreadable)." }
+# Existing payload's series is {d,p,ma} - only need the price (p) for merge/fallback purposes;
+# MA/ATH/vol are always recomputed fresh from the full merged price history below.
+$existingPriceSeries = if ($existingPayload) {
+    , ($existingPayload.series | ForEach-Object { [PSCustomObject]@{ Date = $_.d; Value = [double]$_.p } })
+} else { @() }
 
 Write-Output "Fetching BTC price history..."
-$resp = Invoke-RestMethod -Uri "https://api.blockchain.info/charts/market-price?timespan=all&format=json&sampled=false" -UseBasicParsing
-
-$raw = $resp.values | Sort-Object x
-$startIdx = 0
-for ($i = 0; $i -lt $raw.Count; $i++) {
-    if ($raw[$i].y -gt 0) { $startIdx = $i; break }
-}
-
-$daily = @()
-for ($i = $startIdx; $i -lt $raw.Count; $i++) {
-    $daily += [PSCustomObject]@{
-        Date   = [DateTimeOffset]::FromUnixTimeSeconds([int64]$raw[$i].x).UtcDateTime.Date
-        Price  = [double]$raw[$i].y
-        MA200W = $null
+$freshPriceSeries = @()
+try {
+    $resp = Invoke-RestMethod -Uri "https://api.blockchain.info/charts/market-price?timespan=all&format=json&sampled=false" -UseBasicParsing -TimeoutSec 30
+    $rawVals = $resp.values | Sort-Object x
+    $startIdx = 0
+    for ($i = 0; $i -lt $rawVals.Count; $i++) { if ($rawVals[$i].y -gt 0) { $startIdx = $i; break } }
+    $list = New-Object System.Collections.Generic.List[object]
+    for ($i = $startIdx; $i -lt $rawVals.Count; $i++) {
+        $d = [DateTimeOffset]::FromUnixTimeSeconds([int64]$rawVals[$i].x).UtcDateTime.Date
+        $list.Add([PSCustomObject]@{ Date = $d.ToString("yyyy-MM-dd"); Value = [double]$rawVals[$i].y })
     }
+    # NOTE: no leading comma here - "return , (...)" is the correct idiom to stop a function
+    # from unrolling its return value, but that same comma on a plain variable assignment
+    # double-wraps the array instead (confirmed: produced a 1-element array whose only element
+    # was the real 5842-item array). Direct assignment doesn't need it.
+    $freshPriceSeries = $list | Sort-Object Date
+} catch {
+    Write-Host ("::error::blockchain.info fetch failed: {0}" -f $_.Exception.Message)
 }
 
-Write-Output ("Loaded {0} daily price points, {1} to {2}" -f $daily.Count, $daily[0].Date.ToString("yyyy-MM-dd"), $daily[-1].Date.ToString("yyyy-MM-dd"))
+# blockchain.info history runs back to 2010 - thousands of points expected. 500 is a
+# conservative floor that catches a truncated/broken response without being trigger-happy.
+$priceResult = Get-ValidatedMergedSeries -Fresh $freshPriceSeries -Existing $existingPriceSeries -MinCount 500 -Name "btc-price"
+if ($priceResult.series.Count -eq 0) {
+    throw "No usable BTC price data (fresh fetch invalid and no existing cache) - refusing to write data\btc_data.js."
+}
+Write-Output ("  btc-price: {0} pts, {1} to {2} [{3}]" -f $priceResult.series.Count, $priceResult.series[0].Date, $priceResult.series[-1].Date, $priceResult.status)
+
+$daily = $priceResult.series | ForEach-Object { [PSCustomObject]@{ Date = [DateTime]::Parse($_.Date); Price = $_.Value; MA200W = $null } }
 
 # --- Weekly resample: last available daily close per calendar week (Mon-start) ---
 $cal = [System.Globalization.CultureInfo]::InvariantCulture.Calendar
@@ -98,7 +126,9 @@ $latestMA = $daily[$daily.Count - 1].MA200W
 $premiumPct = $null
 if ($null -ne $latestMA) { $premiumPct = (($currentPrice - $latestMA) / $latestMA) * 100.0 }
 
-# --- CME basis: front-month BTC futures vs. spot, same vendor for both so the spread is apples-to-apples ---
+# --- CME basis: front-month BTC futures vs. spot, same vendor for both so the spread is apples-to-apples.
+# This is a live snapshot (not a history series) - on failure, fall back to the existing cached
+# value (marked stale) rather than going blank, same "fail stale, not broken" principle. ---
 function Get-LastFriday($year, $month) {
     $lastDay = [DateTime]::new($year, $month, [DateTime]::DaysInMonth($year, $month))
     while ($lastDay.DayOfWeek -ne [System.DayOfWeek]::Friday) { $lastDay = $lastDay.AddDays(-1) }
@@ -107,15 +137,20 @@ function Get-LastFriday($year, $month) {
 
 $monthMap = @{ Jan=1; Feb=2; Mar=3; Apr=4; May=5; Jun=6; Jul=7; Aug=8; Sep=9; Oct=10; Nov=11; Dec=12 }
 $cmeBasis = $null
+$cmeBasisStatus = "error"
 try {
     $ua = "Mozilla/5.0"
-    $futResp = Invoke-RestMethod -Uri "https://query1.finance.yahoo.com/v8/finance/chart/BTC=F?range=1d&interval=1d" -Headers @{ "User-Agent" = $ua }
-    $spotResp = Invoke-RestMethod -Uri "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=1d&interval=1d" -Headers @{ "User-Agent" = $ua }
+    $futResp = Invoke-RestMethod -Uri "https://query1.finance.yahoo.com/v8/finance/chart/BTC=F?range=1d&interval=1d" -Headers @{ "User-Agent" = $ua } -TimeoutSec 30
+    $spotResp = Invoke-RestMethod -Uri "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=1d&interval=1d" -Headers @{ "User-Agent" = $ua } -TimeoutSec 30
 
     $futMeta = $futResp.chart.result[0].meta
     $futPrice = [double]$futMeta.regularMarketPrice
     $spotPrice = [double]$spotResp.chart.result[0].meta.regularMarketPrice
     $contractLabel = $futMeta.shortName
+
+    if ($null -eq $futPrice -or $null -eq $spotPrice -or [double]::IsNaN($futPrice) -or [double]::IsNaN($spotPrice) -or $spotPrice -eq 0) {
+        throw "futures/spot price missing or invalid"
+    }
 
     $rawBasisPct = (($futPrice - $spotPrice) / $spotPrice) * 100.0
 
@@ -141,10 +176,26 @@ try {
         annualizedBasisPct = if ($null -ne $annualizedBasisPct) { [math]::Round($annualizedBasisPct, 2) } else { $null }
         daysToExpiry       = $daysToExpiry
     }
+    $cmeBasisStatus = "ok"
     Write-Output ("CME basis: {0} vs spot {1} ({2}) -> raw {3}%, annualized {4}%, {5}d to expiry" -f `
         $futPrice, $spotPrice, $contractLabel, $cmeBasis.rawBasisPct, $cmeBasis.annualizedBasisPct, $daysToExpiry)
 } catch {
-    Write-Output ("CME basis fetch failed, leaving null: {0}" -f $_.Exception.Message)
+    Write-Host ("::warning::CME basis fetch failed: {0}" -f $_.Exception.Message)
+    if ($existingPayload -and $existingPayload.stats.cmeBasis) {
+        $e = $existingPayload.stats.cmeBasis
+        $cmeBasis = @{
+            futuresPrice       = $e.futuresPrice
+            spotPriceRef       = $e.spotPriceRef
+            contractLabel      = $e.contractLabel
+            rawBasisPct        = $e.rawBasisPct
+            annualizedBasisPct = $e.annualizedBasisPct
+            daysToExpiry       = $e.daysToExpiry
+        }
+        $cmeBasisStatus = "stale"
+        Write-Host "::warning::CME basis: falling back to last cached value"
+    } else {
+        Write-Host "::error::CME basis: no fresh data and no existing cached value - will show as unavailable"
+    }
 }
 
 # --- Build output payload ---
@@ -163,11 +214,15 @@ if ($null -ne $vol30) { $statsVol30 = [math]::Round($vol30, 2) }
 $statsVol90 = $null
 if ($null -ne $vol90) { $statsVol90 = [math]::Round($vol90, 2) }
 
+$nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $payload = @{
-    generatedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    asOfDate       = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
-    series         = $series
-    stats          = @{
+    generatedAtUtc        = $nowUtc
+    lastSuccessfulRefresh = $nowUtc
+    lastObservation       = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
+    sourceStatus          = @{ blockchainInfo = $priceResult.status; cmeBasis = $cmeBasisStatus }
+    asOfDate              = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
+    series                = $series
+    stats                 = @{
         price       = [math]::Round($currentPrice, 2)
         ma200w      = $statsMA
         premiumPct  = $statsPremium
@@ -180,11 +235,6 @@ $payload = @{
     }
 }
 
-$json = $payload | ConvertTo-Json -Depth 6 -Compress
-$jsOut = "window.BTC_DATA = $json;"
-$outPath = Join-Path $dataDir "btc_data.js"
-Set-Content -Path $outPath -Value $jsOut -Encoding UTF8
-
-Write-Output "Wrote $outPath"
+Write-DataFileAtomic -Path $outPath -VarName "BTC_DATA" -Payload $payload -Depth 6
 Write-Output ("Price: {0}  200W MA: {1}  Premium: {2}%  ATH: {3} ({4})  Drawdown: {5}%  Vol30D: {6}%  Vol90D: {7}%" -f `
     $currentPrice, $statsMA, $statsPremium, $athPrice, $payload.stats.athDate, $drawdownPct, $statsVol30, $statsVol90)

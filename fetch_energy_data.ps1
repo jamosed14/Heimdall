@@ -1,9 +1,14 @@
 # Physical oil/gas system: headline spot prices, locally-calculated crack spreads (badged as
 # Heimdall calc, same convention as Net Liquidity), inventories, and natural gas storage.
 # Source: EIA API v2 (api.eia.gov). Writes data\energy_data.js.
+#
+# Data-integrity model (see fetch_common.ps1): every raw series is validated and merged with its
+# own existing cached history independently - a bad/blocked/malformed EIA fetch for one series
+# falls back to that series' last known-good data without affecting the others.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root "fetch_common.ps1")
 # Local dev: dot-source the gitignored config file. CI (GitHub Actions): fall back to the
 # EIA_API_KEY env var, populated from a repo secret - the key is never written to disk there.
 $eiaConfigPath = Join-Path $root "eia_config.ps1"
@@ -17,19 +22,37 @@ if (Test-Path $eiaConfigPath) {
 
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
+$outPath = Join-Path $dataDir "energy_data.js"
+
+$existingPayload = Get-ExistingPayload $outPath
+if ($existingPayload) { Write-Output ("Existing cache found: generated {0}" -f $existingPayload.generatedAtUtc) }
+else { Write-Output "No existing cache found (first run, or previous file unreadable)." }
+function Get-ExistingRaw($key) {
+    if ($existingPayload -and $existingPayload.rawSeries -and $existingPayload.rawSeries.$key) {
+        return ConvertFrom-SeriesJson $existingPayload.rawSeries.$key
+    }
+    return @()
+}
 
 $START_DATE = "2010-01-01"
 
+# Never throws - a network/HTTP failure becomes an empty array, which Test-SeriesSane rejects
+# and the per-series merge below then falls back to that series' cached history for.
 function Get-EiaSeries($route, $seriesId, $frequency) {
-    $uri = "https://api.eia.gov/v2/$route/data/?api_key=$EIA_API_KEY&frequency=$frequency&data%5B0%5D=value&facets%5Bseries%5D%5B%5D=$seriesId&sort%5B0%5D%5Bcolumn%5D=period&sort%5B0%5D%5Bdirection%5D=asc&length=5000&start=$START_DATE"
-    $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing
-    $out = New-Object System.Collections.Generic.List[object]
-    foreach ($o in $resp.response.data) {
-        if ($null -ne $o.value -and $o.value -ne "") {
-            $out.Add([PSCustomObject]@{ Date = $o.period; Value = [double]$o.value })
+    try {
+        $uri = "https://api.eia.gov/v2/$route/data/?api_key=$EIA_API_KEY&frequency=$frequency&data%5B0%5D=value&facets%5Bseries%5D%5B%5D=$seriesId&sort%5B0%5D%5Bcolumn%5D=period&sort%5B0%5D%5Bdirection%5D=asc&length=5000&start=$START_DATE"
+        $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($o in $resp.response.data) {
+            if ($null -ne $o.value -and $o.value -ne "") {
+                $out.Add([PSCustomObject]@{ Date = $o.period; Value = [double]$o.value })
+            }
         }
+        return $out | Sort-Object Date
+    } catch {
+        Write-Host ("::error::EIA fetch failed for {0}/{1}: {2}" -f $route, $seriesId, $_.Exception.Message)
+        return @()
     }
-    return , ($out | Sort-Object Date)
 }
 
 function New-DateMap($series) {
@@ -80,24 +103,43 @@ function To-SeriesJson($series, $digits) {
 }
 
 Write-Output "Fetching EIA series..."
+# Conservative MinCount floors by native frequency (2010-now) - well under the realistic count.
+$EIA_ROUTES = [ordered]@{
+    WTI        = @{ route = "petroleum/pri/spt"; id = "RWTC"; freq = "daily"; minCount = 1000 }
+    BRENT      = @{ route = "petroleum/pri/spt"; id = "RBRTE"; freq = "daily"; minCount = 1000 }
+    RBOB       = @{ route = "petroleum/pri/spt"; id = "EER_EPMRR_PF4_Y05LA_DPG"; freq = "daily"; minCount = 1000 }
+    ULSD       = @{ route = "petroleum/pri/spt"; id = "EER_EPD2DXL0_PF4_Y35NY_DPG"; freq = "daily"; minCount = 1000 }
+    HENRYHUB   = @{ route = "natural-gas/pri/fut"; id = "RNGWHHD"; freq = "daily"; minCount = 1000 }
+    CRUDESTK   = @{ route = "petroleum/stoc/wstk"; id = "WCRSTUS1"; freq = "weekly"; minCount = 300 }
+    CUSHINGSTK = @{ route = "petroleum/stoc/wstk"; id = "W_EPC0_SAX_YCUOK_MBBL"; freq = "weekly"; minCount = 300 }
+    GASSTK     = @{ route = "petroleum/stoc/wstk"; id = "WGTSTUS1"; freq = "weekly"; minCount = 300 }
+    DISTSTK    = @{ route = "petroleum/stoc/wstk"; id = "WDISTUS1"; freq = "weekly"; minCount = 300 }
+    UTIL       = @{ route = "petroleum/pnp/wiup"; id = "WPULEUS3"; freq = "weekly"; minCount = 300 }
+    CRUDEPROD  = @{ route = "petroleum/crd/crpdn"; id = "MCRFPUS2"; freq = "monthly"; minCount = 80 }
+    GASSTOR    = @{ route = "natural-gas/stor/wkly"; id = "NW2_EPG0_SWO_R48_BCF"; freq = "weekly"; minCount = 300 }
+}
 $raw = @{}
-$raw["WTI"]        = Get-EiaSeries "petroleum/pri/spt" "RWTC" "daily"
-$raw["BRENT"]      = Get-EiaSeries "petroleum/pri/spt" "RBRTE" "daily"
-$raw["RBOB"]       = Get-EiaSeries "petroleum/pri/spt" "EER_EPMRR_PF4_Y05LA_DPG" "daily"
-$raw["ULSD"]       = Get-EiaSeries "petroleum/pri/spt" "EER_EPD2DXL0_PF4_Y35NY_DPG" "daily"
-$raw["HENRYHUB"]   = Get-EiaSeries "natural-gas/pri/fut" "RNGWHHD" "daily"
-$raw["CRUDESTK"]   = Get-EiaSeries "petroleum/stoc/wstk" "WCRSTUS1" "weekly"
-$raw["CUSHINGSTK"] = Get-EiaSeries "petroleum/stoc/wstk" "W_EPC0_SAX_YCUOK_MBBL" "weekly"
-$raw["GASSTK"]     = Get-EiaSeries "petroleum/stoc/wstk" "WGTSTUS1" "weekly"
-$raw["DISTSTK"]    = Get-EiaSeries "petroleum/stoc/wstk" "WDISTUS1" "weekly"
-$raw["UTIL"]       = Get-EiaSeries "petroleum/pnp/wiup" "WPULEUS3" "weekly"
-$raw["CRUDEPROD"]  = Get-EiaSeries "petroleum/crd/crpdn" "MCRFPUS2" "monthly"
-$raw["GASSTOR"]    = Get-EiaSeries "natural-gas/stor/wkly" "NW2_EPG0_SWO_R48_BCF" "weekly"
+$sourceStatus = @{}
+foreach ($k in $EIA_ROUTES.Keys) {
+    $meta = $EIA_ROUTES[$k]
+    $fresh = Get-EiaSeries $meta.route $meta.id $meta.freq
+    $result = Get-ValidatedMergedSeries -Fresh $fresh -Existing (Get-ExistingRaw $k) -MinCount $meta.minCount -Name $k
+    $raw[$k] = $result.series
+    $sourceStatus[$k] = $result.status
+    if ($raw[$k].Count -gt 0) {
+        Write-Output ("  {0}: {1} points, latest {2} = {3} [{4}]" -f $k, $raw[$k].Count, $raw[$k][-1].Date, $raw[$k][-1].Value, $result.status)
+    } else {
+        Write-Output ("  {0}: NO DATA available [{1}]" -f $k, $result.status)
+    }
+}
 
-foreach ($k in $raw.Keys) {
-    $s = $raw[$k]
-    if ($s.Count -gt 0) { Write-Output ("  {0}: {1} points, latest {2} = {3}" -f $k, $s.Count, $s[-1].Date, $s[-1].Value) }
-    else { Write-Output ("  {0}: no data" -f $k) }
+# WTI/RBOB/ULSD feed crack spreads, GASSTOR feeds the 5Y-seasonal comparison - if these are
+# completely unusable (fresh invalid AND no cache), those calc'd sections would be empty/wrong.
+# Abort and preserve the whole existing file rather than publish a broken one.
+$CRITICAL_KEYS = @("WTI", "RBOB", "ULSD", "GASSTOR")
+$missingCritical = $CRITICAL_KEYS | Where-Object { $raw[$_].Count -eq 0 }
+if ($missingCritical) {
+    throw ("Critical series unusable (no fresh data and no cache): {0} - refusing to write data\energy_data.js." -f ($missingCritical -join ", "))
 }
 
 # --- Crack spreads (Heimdall calc): convert $/gal product prices to $/bbl (x42), date-matched to WTI ---
@@ -196,20 +238,25 @@ $series = @{
     workingGasStorage = To-SeriesJson $raw["GASSTOR"] 0
 }
 
+$rawSeriesJson = @{}
+foreach ($k in $EIA_ROUTES.Keys) { $rawSeriesJson[$k] = To-SeriesJson $raw[$k] 4 }
+
+$nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$lastObservation = ($raw.Values | Where-Object { $_.Count -gt 0 } | ForEach-Object { $_[$_.Count - 1].Date } | Sort-Object -Descending | Select-Object -First 1)
+
 $payload = @{
-    generatedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    generatedAtUtc        = $nowUtc
+    lastSuccessfulRefresh = $nowUtc
+    lastObservation        = $lastObservation
+    sourceStatus           = $sourceStatus
     prices = $prices
     cracks = $cracks
     inventories = $inventories
     naturalGas = $naturalGas
     series = $series
+    rawSeries = $rawSeriesJson
 }
 
-$json = $payload | ConvertTo-Json -Depth 8 -Compress
-$jsOut = "window.ENERGY_DATA = $json;"
-$outPath = Join-Path $dataDir "energy_data.js"
-Set-Content -Path $outPath -Value $jsOut -Encoding UTF8
-
-Write-Output "Wrote $outPath"
+Write-DataFileAtomic -Path $outPath -VarName "ENERGY_DATA" -Payload $payload -Depth 8
 Write-Output ("Crack 3:2:1 = {0}  Gasoline crack = {1}  Distillate crack = {2}" -f $cracks.crack321.value, $cracks.crackGasoline.value, $cracks.crackDistillate.value)
 Write-Output ("Storage vs 5Y avg: {0} Bcf ({1}%)" -f $naturalGas.storageVs5yAvg.value, $naturalGas.storageVs5yAvg.pct)

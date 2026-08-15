@@ -18,6 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root "fetch_common.ps1")
 # Local dev: dot-source the gitignored config files. CI (GitHub Actions): fall back to
 # FRED_API_KEY/EIA_API_KEY env vars, populated from repo secrets - never written to disk there.
 $fredConfigPath = Join-Path $root "fred_config.ps1"
@@ -39,6 +40,11 @@ if (Test-Path $eiaConfigPath) {
 
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
+$outPath = Join-Path $dataDir "ai_data.js"
+
+$existingPayload = Get-ExistingPayload $outPath
+if ($existingPayload) { Write-Output ("Existing cache found: generated {0}" -f $existingPayload.generatedAtUtc) }
+else { Write-Output "No existing cache found (first run, or previous file unreadable)." }
 
 $SEC_HEADERS = @{ "User-Agent" = "Heimdall Catallaxy (personal research dashboard) jamosed14@gmail.com" }
 
@@ -62,7 +68,7 @@ $DA_TAGS = @("Depreciation")
 function Get-SecConcept($cik, $tag) {
     $uri = "https://data.sec.gov/api/xbrl/companyconcept/CIK$cik/us-gaap/$tag.json"
     try {
-        $resp = Invoke-RestMethod -Uri $uri -Headers $SEC_HEADERS -UseBasicParsing
+        $resp = Invoke-RestMethod -Uri $uri -Headers $SEC_HEADERS -UseBasicParsing -TimeoutSec 30
     } catch {
         return $null
     }
@@ -268,119 +274,155 @@ foreach ($ticker in $COMPANIES.Keys) {
         $latestRevQ.End, $latestRevQ.Value, $revConcept.tag, $latestCapexQ.End, $latestCapexQ.Value, $capexConcept.tag, $revQ.Count, $capexQ.Count)
 }
 
-# Refuse to publish a broken "aggregate" - if SEC EDGAR is unreachable/blocking this run
-# (observed: works fine from a local machine, returns nothing from a GitHub Actions runner IP,
-# most likely SEC rate-limiting/blocking shared cloud IP ranges) every company gets skipped
-# above and $companyResults would be empty. Throwing here, before any output is written, means
-# the existing data\ai_data.js (last known-good) is left untouched rather than overwritten with
-# a $0/"0 companies" aggregate - this is the standing Heimdall rule ("never silently replace
-# missing data with zero, preserve last-known-good data") applied to a total-outage case that
-# per-company skip handling alone didn't cover.
+# Source isolation: SEC being down must NOT block the FRED/EIA sections below (compute/power/
+# infrastructure/capitalCycle have nothing to do with SEC's health). So this no longer throws
+# and aborts the whole script - instead, on a SEC outage, the capital section specifically
+# falls back to the existing cached capital section (marked stale), and the script continues.
+# The only way capital ends up truly empty (not stale-but-present) is a first-ever run with SEC
+# down and no prior cache to fall back to - "never coerce missing to zero" applies here too:
+# that case gets nulls/empty structures, not a fabricated $0.
+$secStatus = "ok"
 if ($companyResults.Count -lt $COMPANIES.Count) {
-    throw ("Only {0} of {1} companies resolved from SEC EDGAR - refusing to write a partial/broken aggregate. Leaving existing data\ai_data.js untouched. This usually means SEC EDGAR rejected/rate-limited requests from this machine's IP - works reliably from a residential/local IP, has failed from GitHub Actions runners." -f $companyResults.Count, $COMPANIES.Count)
-}
-
-# ---- Aggregate across companies: each company's own latest quarter / own TTM, summed.
-# Not calendar-synchronized (MSFT/ORCL fiscal quarters don't align to calendar quarters) -
-# the per-company breakdown above preserves each company's actual period-end date so this
-# approximation is visible, not hidden.
-$aggLatestCapex = 0.0; $aggLatestRevenue = 0.0
-$aggTtmCapex = 0.0; $aggTtmRevenue = 0.0
-$aggTtmCapexYoyNum = 0.0; $aggTtmCapexYoyDen = 0.0
-$aggTtmRevenueYoyNum = 0.0; $aggTtmRevenueYoyDen = 0.0
-$companyCount = 0
-foreach ($ticker in $companyResults.Keys) {
-    $c = $companyResults[$ticker]
-    $aggLatestCapex += $c.latestQuarter.capex
-    $aggLatestRevenue += $c.latestQuarter.revenue
-    $aggTtmCapex += $c.ttm.capex
-    $aggTtmRevenue += $c.ttm.revenue
-    $companyCount++
-}
-# Aggregate TTM YoY needs each company's own prior-year TTM; recompute from series directly.
-foreach ($ticker in $companyResults.Keys) {
-    $c = $companyResults[$ticker]
-    $capexSeries = $c.series.capex
-    $revSeries = $c.series.revenue
-    if ($capexSeries.Count -ge 8) {
-        $priorTtm = 0.0
-        for ($i = $capexSeries.Count - 8; $i -le $capexSeries.Count - 5; $i++) { $priorTtm += $capexSeries[$i].v }
-        $aggTtmCapexYoyDen += $priorTtm
+    Write-Host ("::error::Only {0} of {1} companies resolved from SEC EDGAR (usually SEC rate-limiting/blocking this machine's IP - reliable from a residential/local IP, has failed from GitHub Actions runners before)." -f $companyResults.Count, $COMPANIES.Count)
+    if ($existingPayload -and $existingPayload.capital -and $existingPayload.capital.companies -and ($existingPayload.capital.companies.PSObject.Properties | Measure-Object).Count -gt 0) {
+        Write-Host "::warning::Falling back to existing cached capital section (stale)."
+        $secStatus = "stale"
+        $capitalSection = @{
+            companies = $existingPayload.capital.companies
+            aggregate = $existingPayload.capital.aggregate
+            series    = $existingPayload.capital.series
+        }
+    } else {
+        Write-Host "::error::No existing cached capital section either - capital will be unavailable, not zero-filled."
+        $secStatus = "error"
+        $capitalSection = @{
+            companies = @{}
+            aggregate = @{ companyCount = 0; latestQuarterCapex = $null; latestQuarterRevenue = $null; ttmCapex = $null; ttmRevenue = $null; ttmCapexYoYPct = $null; ttmRevenueYoYPct = $null; capexOverRevenuePct = $null; capexGrowthMinusRevenueGrowthPpt = $null }
+            series    = @{ aggregateTtmCapex = @() }
+        }
     }
-    if ($revSeries.Count -ge 8) {
-        $priorTtm = 0.0
-        for ($i = $revSeries.Count - 8; $i -le $revSeries.Count - 5; $i++) { $priorTtm += $revSeries[$i].v }
-        $aggTtmRevenueYoyDen += $priorTtm
-    }
-}
-$aggTtmCapexYoyPct = if ($aggTtmCapexYoyDen -ne 0) { (($aggTtmCapex / $aggTtmCapexYoyDen) - 1.0) * 100.0 } else { $null }
-$aggTtmRevenueYoyPct = if ($aggTtmRevenueYoyDen -ne 0) { (($aggTtmRevenue / $aggTtmRevenueYoyDen) - 1.0) * 100.0 } else { $null }
-
-$aggregate = @{
-    companyCount = $companyCount
-    latestQuarterCapex = [math]::Round($aggLatestCapex, 0)
-    latestQuarterRevenue = [math]::Round($aggLatestRevenue, 0)
-    ttmCapex = [math]::Round($aggTtmCapex, 0)
-    ttmRevenue = [math]::Round($aggTtmRevenue, 0)
-    ttmCapexYoYPct = if ($null -ne $aggTtmCapexYoyPct) { [math]::Round($aggTtmCapexYoyPct, 2) } else { $null }
-    ttmRevenueYoYPct = if ($null -ne $aggTtmRevenueYoyPct) { [math]::Round($aggTtmRevenueYoyPct, 2) } else { $null }
-    capexOverRevenuePct = if ($aggTtmRevenue -ne 0) { [math]::Round(($aggTtmCapex / $aggTtmRevenue) * 100.0, 2) } else { $null }
-    capexGrowthMinusRevenueGrowthPpt = if (($null -ne $aggTtmCapexYoyPct) -and ($null -ne $aggTtmRevenueYoyPct)) { [math]::Round($aggTtmCapexYoyPct - $aggTtmRevenueYoyPct, 2) } else { $null }
-}
-
-# Aggregate TTM capex sampled at calendar quarter-ends (Mar/Jun/Sep/Dec 31): for each date,
-# sum each company's most-recently-known TTM as-of that date. An approximation (companies
-# report on different schedules/fiscal calendars) - not a synchronized true calendar sum.
-function Get-AggregateTtmSeries($companyResults) {
-    $allDates = New-Object System.Collections.Generic.List[DateTime]
-    $today = Get-Date
-    $d = [DateTime]::new(2019, 3, 31)
-    while ($d -le $today) {
-        $allDates.Add($d)
-        $d = $d.AddMonths(3)
-        $lastDayOfQuarter = [DateTime]::new($d.Year, $d.Month, [DateTime]::DaysInMonth($d.Year, $d.Month))
-        $d = $lastDayOfQuarter
-    }
-    $companyTtmPoints = @{}
+} else {
+    # ---- Aggregate across companies: each company's own latest quarter / own TTM, summed.
+    # Not calendar-synchronized (MSFT/ORCL fiscal quarters don't align to calendar quarters) -
+    # the per-company breakdown above preserves each company's actual period-end date so this
+    # approximation is visible, not hidden.
+    $aggLatestCapex = 0.0; $aggLatestRevenue = 0.0
+    $aggTtmCapex = 0.0; $aggTtmRevenue = 0.0
+    $aggTtmCapexYoyDen = 0.0; $aggTtmRevenueYoyDen = 0.0
+    $companyCount = 0
     foreach ($ticker in $companyResults.Keys) {
-        $s = $companyResults[$ticker].series.capex
-        $pts = New-Object System.Collections.Generic.List[object]
-        for ($i = 3; $i -lt $s.Count; $i++) {
-            $sum = 0.0
-            for ($j = $i - 3; $j -le $i; $j++) { $sum += $s[$j].v }
-            $pts.Add(@{ d = [DateTime]::Parse($s[$i].d); v = $sum })
-        }
-        $companyTtmPoints[$ticker] = $pts
+        $c = $companyResults[$ticker]
+        $aggLatestCapex += $c.latestQuarter.capex
+        $aggLatestRevenue += $c.latestQuarter.revenue
+        $aggTtmCapex += $c.ttm.capex
+        $aggTtmRevenue += $c.ttm.revenue
+        $companyCount++
     }
-    $out = New-Object System.Collections.Generic.List[object]
-    foreach ($qEnd in $allDates) {
-        $sum = 0.0
-        $anyData = $false
-        foreach ($ticker in $companyTtmPoints.Keys) {
-            $best = $null
-            foreach ($p in $companyTtmPoints[$ticker]) {
-                if ($p.d -le $qEnd -and (($p.d - $qEnd).Days -ge -100)) {
-                    if ($null -eq $best -or $p.d -gt $best.d) { $best = $p }
-                }
+    # Aggregate TTM YoY needs each company's own prior-year TTM; recompute from series directly.
+    foreach ($ticker in $companyResults.Keys) {
+        $c = $companyResults[$ticker]
+        $capexSeries = $c.series.capex
+        $revSeries = $c.series.revenue
+        if ($capexSeries.Count -ge 8) {
+            $priorTtm = 0.0
+            for ($i = $capexSeries.Count - 8; $i -le $capexSeries.Count - 5; $i++) { $priorTtm += $capexSeries[$i].v }
+            $aggTtmCapexYoyDen += $priorTtm
+        }
+        if ($revSeries.Count -ge 8) {
+            $priorTtm = 0.0
+            for ($i = $revSeries.Count - 8; $i -le $revSeries.Count - 5; $i++) { $priorTtm += $revSeries[$i].v }
+            $aggTtmRevenueYoyDen += $priorTtm
+        }
+    }
+    $aggTtmCapexYoyPct = if ($aggTtmCapexYoyDen -ne 0) { (($aggTtmCapex / $aggTtmCapexYoyDen) - 1.0) * 100.0 } else { $null }
+    $aggTtmRevenueYoyPct = if ($aggTtmRevenueYoyDen -ne 0) { (($aggTtmRevenue / $aggTtmRevenueYoyDen) - 1.0) * 100.0 } else { $null }
+
+    $aggregate = @{
+        companyCount = $companyCount
+        latestQuarterCapex = [math]::Round($aggLatestCapex, 0)
+        latestQuarterRevenue = [math]::Round($aggLatestRevenue, 0)
+        ttmCapex = [math]::Round($aggTtmCapex, 0)
+        ttmRevenue = [math]::Round($aggTtmRevenue, 0)
+        ttmCapexYoYPct = if ($null -ne $aggTtmCapexYoyPct) { [math]::Round($aggTtmCapexYoyPct, 2) } else { $null }
+        ttmRevenueYoYPct = if ($null -ne $aggTtmRevenueYoyPct) { [math]::Round($aggTtmRevenueYoyPct, 2) } else { $null }
+        capexOverRevenuePct = if ($aggTtmRevenue -ne 0) { [math]::Round(($aggTtmCapex / $aggTtmRevenue) * 100.0, 2) } else { $null }
+        capexGrowthMinusRevenueGrowthPpt = if (($null -ne $aggTtmCapexYoyPct) -and ($null -ne $aggTtmRevenueYoyPct)) { [math]::Round($aggTtmCapexYoyPct - $aggTtmRevenueYoyPct, 2) } else { $null }
+    }
+
+    # Aggregate TTM capex sampled at calendar quarter-ends (Mar/Jun/Sep/Dec 31): for each date,
+    # sum each company's most-recently-known TTM as-of that date. An approximation (companies
+    # report on different schedules/fiscal calendars) - not a synchronized true calendar sum.
+    function Get-AggregateTtmSeries($companyResults) {
+        $allDates = New-Object System.Collections.Generic.List[DateTime]
+        $today = Get-Date
+        $d = [DateTime]::new(2019, 3, 31)
+        while ($d -le $today) {
+            $allDates.Add($d)
+            $d = $d.AddMonths(3)
+            $lastDayOfQuarter = [DateTime]::new($d.Year, $d.Month, [DateTime]::DaysInMonth($d.Year, $d.Month))
+            $d = $lastDayOfQuarter
+        }
+        $companyTtmPoints = @{}
+        foreach ($ticker in $companyResults.Keys) {
+            $s = $companyResults[$ticker].series.capex
+            $pts = New-Object System.Collections.Generic.List[object]
+            for ($i = 3; $i -lt $s.Count; $i++) {
+                $sum = 0.0
+                for ($j = $i - 3; $j -le $i; $j++) { $sum += $s[$j].v }
+                $pts.Add(@{ d = [DateTime]::Parse($s[$i].d); v = $sum })
             }
-            if ($best) { $sum += $best.v; $anyData = $true }
+            $companyTtmPoints[$ticker] = $pts
         }
-        if ($anyData) { $out.Add(@{ d = $qEnd.ToString("yyyy-MM-dd"); v = [math]::Round($sum, 0) }) }
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($qEnd in $allDates) {
+            $sum = 0.0
+            $anyData = $false
+            foreach ($ticker in $companyTtmPoints.Keys) {
+                $best = $null
+                foreach ($p in $companyTtmPoints[$ticker]) {
+                    if ($p.d -le $qEnd -and (($p.d - $qEnd).Days -ge -100)) {
+                        if ($null -eq $best -or $p.d -gt $best.d) { $best = $p }
+                    }
+                }
+                if ($best) { $sum += $best.v; $anyData = $true }
+            }
+            if ($anyData) { $out.Add(@{ d = $qEnd.ToString("yyyy-MM-dd"); v = [math]::Round($sum, 0) }) }
+        }
+        return , $out
     }
-    return , $out
+    $aggregateTtmCapexSeries = Get-AggregateTtmSeries $companyResults
+
+    $capitalSection = @{
+        companies = $companyResults
+        aggregate = $aggregate
+        series    = @{ aggregateTtmCapex = $aggregateTtmCapexSeries }
+    }
 }
-$aggregateTtmCapexSeries = Get-AggregateTtmSeries $companyResults
 
 # ===================== FRED: semiconductor / infrastructure / capital cycle =====================
 
+# Never throws - a network/HTTP failure becomes an empty array, which Test-SeriesSane rejects
+# and the per-series merge below then falls back to that series' cached history for.
 function Get-FredSeries($seriesId) {
-    $uri = "https://api.stlouisfed.org/fred/series/observations?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json&observation_start=2005-01-01"
-    $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing
-    $out = New-Object System.Collections.Generic.List[object]
-    foreach ($o in $resp.observations) {
-        if ($o.value -ne ".") { $out.Add([PSCustomObject]@{ Date = $o.date; Value = [double]$o.value }) }
+    try {
+        $uri = "https://api.stlouisfed.org/fred/series/observations?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json&observation_start=2005-01-01"
+        $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($o in $resp.observations) {
+            if ($o.value -ne ".") { $out.Add([PSCustomObject]@{ Date = $o.date; Value = [double]$o.value }) }
+        }
+        return $out | Sort-Object Date
+    } catch {
+        Write-Host ("::error::FRED fetch failed for {0}: {1}" -f $seriesId, $_.Exception.Message)
+        return @()
     }
-    return , ($out | Sort-Object Date)
+}
+
+function Get-ExistingAiSeries($key) {
+    if ($existingPayload -and $existingPayload.series -and $existingPayload.series.$key) {
+        return ConvertFrom-SeriesJson $existingPayload.series.$key
+    }
+    return @()
 }
 
 function To-SeriesJson($series, $digits) {
@@ -419,16 +461,32 @@ function Get-LatestStat($series, $freq) {
 }
 
 Write-Output "Fetching FRED series..."
-$semiIP = Get-FredSeries "IPG3344S"
-$semiCapUtil = Get-FredSeries "CAPUTLG3344S"
-$transformerPPI = Get-FredSeries "WPU11740999"
-$elecEquipProd = Get-FredSeries "IPG335S"
-$infoProcessingInvestment = Get-FredSeries "A679RC1Q027SBEA"
-Write-Output ("  IPG3344S: {0} pts, latest {1}={2}" -f $semiIP.Count, $semiIP[-1].Date, $semiIP[-1].Value)
-Write-Output ("  CAPUTLG3344S: {0} pts, latest {1}={2}" -f $semiCapUtil.Count, $semiCapUtil[-1].Date, $semiCapUtil[-1].Value)
-Write-Output ("  WPU11740999: {0} pts, latest {1}={2}" -f $transformerPPI.Count, $transformerPPI[-1].Date, $transformerPPI[-1].Value)
-Write-Output ("  IPG335S: {0} pts, latest {1}={2}" -f $elecEquipProd.Count, $elecEquipProd[-1].Date, $elecEquipProd[-1].Value)
-Write-Output ("  A679RC1Q027SBEA: {0} pts, latest {1}={2}" -f $infoProcessingInvestment.Count, $infoProcessingInvestment[-1].Date, $infoProcessingInvestment[-1].Value)
+$fredSourceStatus = @{}
+$FRED_SERIES_META = [ordered]@{
+    semiIP = @{ id = "IPG3344S"; minCount = 100 }
+    semiCapUtil = @{ id = "CAPUTLG3344S"; minCount = 100 }
+    transformerPPI = @{ id = "WPU11740999"; minCount = 100 }
+    elecEquipProd = @{ id = "IPG335S"; minCount = 100 }
+    infoProcessingInvestment = @{ id = "A679RC1Q027SBEA"; minCount = 30 }
+}
+$fredRaw = @{}
+foreach ($key in $FRED_SERIES_META.Keys) {
+    $meta = $FRED_SERIES_META[$key]
+    $fresh = Get-FredSeries $meta.id
+    $result = Get-ValidatedMergedSeries -Fresh $fresh -Existing (Get-ExistingAiSeries $key) -MinCount $meta.minCount -Name $key
+    $fredRaw[$key] = $result.series
+    $fredSourceStatus[$key] = $result.status
+    if ($fredRaw[$key].Count -gt 0) {
+        Write-Output ("  {0} ({1}): {2} pts, latest {3}={4} [{5}]" -f $key, $meta.id, $fredRaw[$key].Count, $fredRaw[$key][-1].Date, $fredRaw[$key][-1].Value, $result.status)
+    } else {
+        Write-Output ("  {0} ({1}): NO DATA available [{2}]" -f $key, $meta.id, $result.status)
+    }
+}
+$semiIP = $fredRaw["semiIP"]
+$semiCapUtil = $fredRaw["semiCapUtil"]
+$transformerPPI = $fredRaw["transformerPPI"]
+$elecEquipProd = $fredRaw["elecEquipProd"]
+$infoProcessingInvestment = $fredRaw["infoProcessingInvestment"]
 
 $semiIPYoY = Get-YoyPctSeries $semiIP 12
 $semiCapUtilChgPp = Get-PointChangeSeries $semiCapUtil 12
@@ -457,16 +515,28 @@ $capitalCycle = @{
 
 Write-Output "Fetching EIA retail electricity sales (US total, all sectors)..."
 function Get-EiaRetailSalesUS() {
-    $uri = "https://api.eia.gov/v2/electricity/retail-sales/data/?api_key=$EIA_API_KEY&frequency=monthly&data%5B0%5D=sales&facets%5Bstateid%5D%5B%5D=US&facets%5Bsectorid%5D%5B%5D=ALL&sort%5B0%5D%5Bcolumn%5D=period&sort%5B0%5D%5Bdirection%5D=asc&length=5000&start=2010-01"
-    $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing
-    $out = New-Object System.Collections.Generic.List[object]
-    foreach ($o in $resp.response.data) {
-        if ($null -ne $o.sales -and $o.sales -ne "") { $out.Add([PSCustomObject]@{ Date = "$($o.period)-01"; Value = [double]$o.sales }) }
+    try {
+        $uri = "https://api.eia.gov/v2/electricity/retail-sales/data/?api_key=$EIA_API_KEY&frequency=monthly&data%5B0%5D=sales&facets%5Bstateid%5D%5B%5D=US&facets%5Bsectorid%5D%5B%5D=ALL&sort%5B0%5D%5Bcolumn%5D=period&sort%5B0%5D%5Bdirection%5D=asc&length=5000&start=2010-01"
+        $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($o in $resp.response.data) {
+            if ($null -ne $o.sales -and $o.sales -ne "") { $out.Add([PSCustomObject]@{ Date = "$($o.period)-01"; Value = [double]$o.sales }) }
+        }
+        return $out | Sort-Object Date
+    } catch {
+        Write-Host ("::error::EIA retail-sales fetch failed: {0}" -f $_.Exception.Message)
+        return @()
     }
-    return , ($out | Sort-Object Date)
 }
-$elecDemand = Get-EiaRetailSalesUS
-Write-Output ("  retail-sales: {0} pts, latest {1}={2}" -f $elecDemand.Count, $elecDemand[-1].Date, $elecDemand[-1].Value)
+$freshElecDemand = Get-EiaRetailSalesUS
+$elecDemandResult = Get-ValidatedMergedSeries -Fresh $freshElecDemand -Existing (Get-ExistingAiSeries "elecDemand") -MinCount 100 -Name "elecDemand"
+$elecDemand = $elecDemandResult.series
+$fredSourceStatus["elecDemand"] = $elecDemandResult.status
+if ($elecDemand.Count -gt 0) {
+    Write-Output ("  retail-sales: {0} pts, latest {1}={2} [{3}]" -f $elecDemand.Count, $elecDemand[-1].Date, $elecDemand[-1].Value, $elecDemandResult.status)
+} else {
+    Write-Output ("  retail-sales: NO DATA available [{0}]" -f $elecDemandResult.status)
+}
 
 $elecDemandYoY = Get-YoyPctSeries $elecDemand 12
 function Get-TtmSeries($series) {
@@ -488,15 +558,36 @@ $power = @{
     demandTtmYoYPct = (Get-LatestStat $elecDemandTtmYoY "monthly")
 }
 
-# ===================== Write payload =====================
+# ===================== Write payload (atomic) =====================
+
+$sourceStatus = @{ sec = $secStatus }
+foreach ($k in $fredSourceStatus.Keys) { $sourceStatus[$k] = $fredSourceStatus[$k] }
+
+# If BOTH the SEC-derived capital section AND every FRED/EIA series are unusable, there's
+# nothing meaningful to publish (only possible on a first-ever run with every source down at
+# once) - abort rather than write an all-empty shell.
+function Get-KeyCount($obj) {
+    if ($null -eq $obj) { return 0 }
+    if ($obj -is [System.Collections.IDictionary]) { return $obj.Keys.Count }
+    return ($obj.PSObject.Properties | Measure-Object).Count
+}
+$fredAnyUsable = ($fredRaw.Values | Where-Object { $_.Count -gt 0 } | Measure-Object).Count -gt 0
+$capitalUsable = (Get-KeyCount $capitalSection.companies) -gt 0
+if (-not $capitalUsable -and -not $fredAnyUsable -and $elecDemand.Count -eq 0) {
+    throw "Every source (SEC, FRED, EIA) is unusable with no existing cache to fall back to - refusing to write data\ai_data.js."
+}
+
+$nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$fredDates = $fredRaw.Values | Where-Object { $_.Count -gt 0 } | ForEach-Object { $_[$_.Count - 1].Date }
+$elecDate = if ($elecDemand.Count -gt 0) { $elecDemand[$elecDemand.Count - 1].Date } else { $null }
+$lastObservation = (@($fredDates) + @($elecDate) | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1)
 
 $payload = @{
-    generatedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    capital = @{
-        companies = $companyResults
-        aggregate = $aggregate
-        series = @{ aggregateTtmCapex = $aggregateTtmCapexSeries }
-    }
+    generatedAtUtc        = $nowUtc
+    lastSuccessfulRefresh  = $nowUtc
+    lastObservation        = $lastObservation
+    sourceStatus           = $sourceStatus
+    capital = $capitalSection
     compute = $compute
     power = $power
     infrastructure = $infrastructure
@@ -512,11 +603,6 @@ $payload = @{
     }
 }
 
-$json = $payload | ConvertTo-Json -Depth 10 -Compress
-$jsOut = "window.AI_DATA = $json;"
-$outPath = Join-Path $dataDir "ai_data.js"
-Set-Content -Path $outPath -Value $jsOut -Encoding UTF8
-
-Write-Output "Wrote $outPath"
+Write-DataFileAtomic -Path $outPath -VarName "AI_DATA" -Payload $payload -Depth 10
 Write-Output ("Aggregate TTM capex: {0:N0}  TTM revenue: {1:N0}  capex/rev: {2}%  capex YoY: {3}%  rev YoY: {4}%" -f `
     $aggregate.ttmCapex, $aggregate.ttmRevenue, $aggregate.capexOverRevenuePct, $aggregate.ttmCapexYoYPct, $aggregate.ttmRevenueYoYPct)

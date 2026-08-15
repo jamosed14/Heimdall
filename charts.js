@@ -13,11 +13,27 @@ window.HeimdallCharts = (function () {
     Chart.defaults.font.size = 12;
   }
 
+  // Minimum valid points before a series is considered chartable - a single dangling point
+  // (or none) isn't a meaningful line and can render oddly (e.g. degenerate axis scaling).
+  var MIN_CHARTABLE_POINTS = 2;
+
   function toPoints(rows, digits) {
-    // rows: [{d: "YYYY-MM-DD", v: number}] -> [{x: msEpoch, y: number}]
-    return rows
-      .filter(function (r) { return r.v !== null && r.v !== undefined; })
-      .map(function (r) { return { x: Date.parse(r.d + "T00:00:00Z"), y: r.v }; });
+    // rows: [{d: "YYYY-MM-DD", v: number}] -> [{x: msEpoch, y: number}], defensively filtered:
+    // drops null/undefined/NaN values and unparseable dates, sorts by date, and dedupes same-
+    // date entries (last one wins) - never trust the cache blindly, even though the fetch
+    // scripts are themselves supposed to guarantee this.
+    if (!rows) return [];
+    var byX = {};
+    rows.forEach(function (r) {
+      if (r.v === null || r.v === undefined) return;
+      var v = Number(r.v);
+      if (!isFinite(v)) return;
+      var x = Date.parse(r.d + "T00:00:00Z");
+      if (!isFinite(x)) return;
+      byX[x] = v; // last occurrence for a given date wins
+    });
+    var xs = Object.keys(byX).map(Number).sort(function (a, b) { return a - b; });
+    return xs.map(function (x) { return { x: x, y: byX[x] }; });
   }
 
   function filterPoints(points, rangeKey, ranges) {
@@ -46,9 +62,34 @@ window.HeimdallCharts = (function () {
     var chart = null;
     var canvas = document.getElementById(opts.canvasId);
     if (!canvas) return null;
-    var ctx = canvas.getContext("2d");
 
-    var seriesPoints = opts.series.map(function (s) { return toPoints(s.rows, 6); });
+    // Defensive rendering: a series with fewer than MIN_CHARTABLE_POINTS valid points after
+    // toPoints' filtering (e.g. a source that came back empty/malformed and had no cache to
+    // fall back to) is dropped rather than plotted as a degenerate single-point/empty line.
+    // Other series in the same chart still render normally - one bad series doesn't blank the
+    // whole panel. Only if EVERY series ends up unchartable does the canvas get replaced with
+    // an explicit "insufficient data" message instead of a misleadingly-empty axis.
+    var validSeries = [];
+    var validPoints = [];
+    opts.series.forEach(function (s) {
+      var pts = toPoints(s.rows, 6);
+      if (pts.length >= MIN_CHARTABLE_POINTS) {
+        validSeries.push(s);
+        validPoints.push(pts);
+      }
+    });
+
+    if (validSeries.length === 0) {
+      var wrap = canvas.closest(".chart-wrap") || canvas.parentElement;
+      if (wrap) {
+        wrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-faint);font-size:13px;font-style:italic;">Insufficient data to render this chart</div>';
+      }
+      return null;
+    }
+
+    var ctx = canvas.getContext("2d");
+    opts = Object.assign({}, opts, { series: validSeries });
+    var seriesPoints = validPoints;
 
     function yFmt(v) { return opts.yFormatter ? opts.yFormatter(v) : String(v); }
 

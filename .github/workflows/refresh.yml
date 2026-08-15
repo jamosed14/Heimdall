@@ -21,19 +21,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Source isolation: each fetch script runs in its own try/catch so one failing (e.g. SEC
+      # EDGAR blocking this runner's IP) never prevents the others from updating. Each script
+      # already guarantees it never writes corrupted output itself (validate-before-overwrite +
+      # atomic temp-file-then-rename inside fetch_common.ps1) - this loop's job is purely to
+      # keep going past a failure and log it loudly, not to protect file integrity itself.
       - name: Run fetch scripts
+        id: fetch
         shell: pwsh
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
         run: |
-          $ErrorActionPreference = "Stop"
-          & "./fetch_btc_data.ps1"
-          & "./fetch_macro_data.ps1"
-          & "./fetch_energy_data.ps1"
-          & "./fetch_ai_data.ps1"
+          $scripts = @("fetch_btc_data.ps1", "fetch_macro_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1", "fetch_credit_data.ps1")
+          $failed = @()
+          foreach ($script in $scripts) {
+            Write-Host "::group::Running $script"
+            try {
+              & "./$script"
+              Write-Host "$script completed"
+            } catch {
+              Write-Host ("::error::{0} FAILED - {1}" -f $script, $_.Exception.Message)
+              $failed += $script
+            }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host ("::error::{0} of {1} fetch scripts failed: {2}" -f $failed.Count, $scripts.Count, ($failed -join ", "))
+            "failed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "failed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
 
+      # Always runs, even if a fetch script above failed - whatever DID refresh successfully
+      # still gets published rather than being blocked by an unrelated source's outage.
       - name: Commit and push if data changed
+        if: always()
         run: |
           git config user.name "heimdall-refresh-bot"
           git config user.email "actions@github.com"
@@ -44,3 +67,12 @@ jobs:
             git commit -m "Data refresh $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             git push
           fi
+
+      # Marks the job/run as failed (visible red X, alertable) if anything went wrong above -
+      # separate from the commit step so a partial failure is loud without blocking whatever
+      # did succeed from being published.
+      - name: Fail job if any fetch script errored
+        if: steps.fetch.outputs.failed == 'true'
+        run: |
+          echo "One or more fetch scripts failed this run - see the 'Run fetch scripts' step log above for ::error:: details. Data that DID succeed was still committed."
+          exit 1

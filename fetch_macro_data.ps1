@@ -2,9 +2,17 @@
 # Inflation / Dollar & FX. Each underlying series (FRED or Yahoo) is pulled exactly once here,
 # even though several tabs display it - this is the single source of truth for macro data.
 # Writes data\macro_data.js (script tag, not fetch(), to avoid file:// CORS issues).
+#
+# Data-integrity model (see fetch_common.ps1): every raw series below is validated and merged
+# with its own existing cached history independently - a bad/blocked/malformed fetch for one
+# series falls back to that series' last known-good data without affecting the other 30+. The
+# `rawSeries` payload block exists purely so every fetched series (not just the ones a page
+# happens to chart) has somewhere to merge/fall back against - purely additive to the schema,
+# no existing page reads it, so nothing breaks.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root "fetch_common.ps1")
 # Local dev: dot-source the gitignored config file. CI (GitHub Actions): fall back to the
 # FRED_API_KEY env var, populated from a repo secret - the key is never written to disk there.
 $fredConfigPath = Join-Path $root "fred_config.ps1"
@@ -18,44 +26,85 @@ if (Test-Path $fredConfigPath) {
 
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
+$outPath = Join-Path $dataDir "macro_data.js"
+
+$existingPayload = Get-ExistingPayload $outPath
+if ($existingPayload) { Write-Output ("Existing cache found: generated {0}" -f $existingPayload.generatedAtUtc) }
+else { Write-Output "No existing cache found (first run, or previous file unreadable)." }
+function Get-ExistingRaw($key) {
+    if ($existingPayload -and $existingPayload.rawSeries -and $existingPayload.rawSeries.$key) {
+        return ConvertFrom-SeriesJson $existingPayload.rawSeries.$key
+    }
+    return @()
+}
 
 $START_DATE = "2003-01-01"
 
 # ===================== Fetch =====================
 
 function Get-FredSeriesLastUpdated($seriesId) {
-    $uri = "https://api.stlouisfed.org/fred/series?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json"
-    $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing
-    return ($resp.seriess[0].last_updated -split " ")[0]
+    try {
+        $uri = "https://api.stlouisfed.org/fred/series?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json"
+        $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
+        return ($resp.seriess[0].last_updated -split " ")[0]
+    } catch {
+        Write-Host ("::warning::Could not fetch last-updated date for {0}: {1}" -f $seriesId, $_.Exception.Message)
+        return $null
+    }
 }
 
+# Never throws - a network/HTTP failure becomes an empty array, which Test-SeriesSane rejects
+# and the per-series merge below then falls back to that series' cached history for.
 function Get-FredSeries($seriesId) {
-    $uri = "https://api.stlouisfed.org/fred/series/observations?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json&observation_start=$START_DATE"
-    $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing
-    $out = New-Object System.Collections.Generic.List[object]
-    foreach ($o in $resp.observations) {
-        if ($o.value -ne ".") { $out.Add([PSCustomObject]@{ Date = $o.date; Value = [double]$o.value }) }
+    try {
+        $uri = "https://api.stlouisfed.org/fred/series/observations?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json&observation_start=$START_DATE"
+        $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($o in $resp.observations) {
+            if ($o.value -ne ".") { $out.Add([PSCustomObject]@{ Date = $o.date; Value = [double]$o.value }) }
+        }
+        return $out | Sort-Object Date
+    } catch {
+        Write-Host ("::error::FRED fetch failed for {0}: {1}" -f $seriesId, $_.Exception.Message)
+        return @()
     }
-    return , ($out | Sort-Object Date)
 }
 
 function Get-YahooDaily($symbol) {
-    $uri = "https://query1.finance.yahoo.com/v8/finance/chart/$symbol`?range=5y&interval=1d"
-    $resp = Invoke-RestMethod -Uri $uri -Headers @{ "User-Agent" = "Mozilla/5.0" } -UseBasicParsing
-    $result = $resp.chart.result[0]
-    $ts = $result.timestamp
-    $closes = $result.indicators.quote[0].close
-    $out = New-Object System.Collections.Generic.List[object]
-    for ($i = 0; $i -lt $ts.Count; $i++) {
-        if ($null -ne $closes[$i]) {
-            $d = [DateTimeOffset]::FromUnixTimeSeconds([int64]$ts[$i]).UtcDateTime.ToString("yyyy-MM-dd")
-            $out.Add([PSCustomObject]@{ Date = $d; Value = [double]$closes[$i] })
+    try {
+        $uri = "https://query1.finance.yahoo.com/v8/finance/chart/$symbol`?range=5y&interval=1d"
+        $resp = Invoke-RestMethod -Uri $uri -Headers @{ "User-Agent" = "Mozilla/5.0" } -UseBasicParsing -TimeoutSec 30
+        $result = $resp.chart.result[0]
+        $ts = $result.timestamp
+        $closes = $result.indicators.quote[0].close
+        $out = New-Object System.Collections.Generic.List[object]
+        for ($i = 0; $i -lt $ts.Count; $i++) {
+            if ($null -ne $closes[$i]) {
+                $d = [DateTimeOffset]::FromUnixTimeSeconds([int64]$ts[$i]).UtcDateTime.ToString("yyyy-MM-dd")
+                $out.Add([PSCustomObject]@{ Date = $d; Value = [double]$closes[$i] })
+            }
         }
+        return $out | Sort-Object Date
+    } catch {
+        Write-Host ("::error::Yahoo fetch failed for {0}: {1}" -f $symbol, $_.Exception.Message)
+        return @()
     }
-    return , ($out | Sort-Object Date)
 }
 
 Write-Output "Fetching FRED series..."
+# Conservative MinCount floors by native frequency (2003-now) - well under the realistic
+# count, just enough to catch an empty/truncated/garbage response, not "a bit less history".
+$SERIES_MIN_COUNT = @{
+    DFF = 1000; SOFR = 500
+    DGS3MO = 1000; DGS2 = 1000; DGS5 = 1000; DGS10 = 1000; DGS30 = 1000; DFII10 = 1000
+    WALCL = 200; WRESBAL = 200; WTREGEN = 200; RRPONTSYD = 1000
+    T5YIE = 1000; T10YIE = 1000
+    CPIAUCSL = 100; CPILFESL = 100; PCEPI = 100; PCEPILFE = 100
+    DEXUSEU = 1000; DEXJPUS = 1000; DEXUSUK = 1000; DEXCHUS = 1000
+    FEDTARMD = 3; FEDTARMDLR = 3
+    MEDCPIM158SFRBCLE = 100; TRMMEANCPIM158SFRBCLE = 100; STICKCPIM157SFRBATL = 100; CORESTICKM159SFRBATL = 100
+    M2SL = 100; GDP = 30; M2V = 30
+}
 $fredIds = @(
     "DFF", "SOFR",
     "DGS3MO", "DGS2", "DGS5", "DGS10", "DGS30", "DFII10",
@@ -68,18 +117,38 @@ $fredIds = @(
     "M2SL", "GDP", "M2V"
 )
 $raw = @{}
+$sourceStatus = @{}
 foreach ($id in $fredIds) {
-    $raw[$id] = Get-FredSeries $id
-    Write-Output ("  {0}: {1} points, latest {2} = {3}" -f $id, $raw[$id].Count, $raw[$id][-1].Date, $raw[$id][-1].Value)
+    $fresh = Get-FredSeries $id
+    $result = Get-ValidatedMergedSeries -Fresh $fresh -Existing (Get-ExistingRaw $id) -MinCount $SERIES_MIN_COUNT[$id] -Name $id
+    $raw[$id] = $result.series
+    $sourceStatus[$id] = $result.status
+    if ($raw[$id].Count -gt 0) {
+        Write-Output ("  {0}: {1} points, latest {2} = {3} [{4}]" -f $id, $raw[$id].Count, $raw[$id][-1].Date, $raw[$id][-1].Value, $result.status)
+    } else {
+        Write-Output ("  {0}: NO DATA available [{1}]" -f $id, $result.status)
+    }
 }
 
 Write-Output "Fetching Yahoo DXY..."
-try {
-    $raw["DXY"] = Get-YahooDaily "DX-Y.NYB"
-    Write-Output ("  DXY: {0} points, latest {1} = {2}" -f $raw["DXY"].Count, $raw["DXY"][-1].Date, $raw["DXY"][-1].Value)
-} catch {
-    $raw["DXY"] = @()
-    Write-Output ("  DXY fetch failed: {0}" -f $_.Exception.Message)
+$freshDxy = Get-YahooDaily "DX-Y.NYB"
+$dxyResult = Get-ValidatedMergedSeries -Fresh $freshDxy -Existing (Get-ExistingRaw "DXY") -MinCount 500 -Name "DXY"
+$raw["DXY"] = $dxyResult.series
+$sourceStatus["DXY"] = $dxyResult.status
+if ($raw["DXY"].Count -gt 0) {
+    Write-Output ("  DXY: {0} points, latest {1} = {2} [{3}]" -f $raw["DXY"].Count, $raw["DXY"][-1].Date, $raw["DXY"][-1].Value, $dxyResult.status)
+} else {
+    Write-Output ("  DXY: NO DATA available [{0}]" -f $dxyResult.status)
+}
+
+# A handful of central series that most of the page's stat blocks derive from - if these are
+# completely unusable (fresh invalid AND no cache), computing changes/spreads against them
+# would cascade nulls through most of the payload. Abort and preserve the whole existing file
+# rather than publish a mostly-empty one.
+$CRITICAL_IDS = @("DGS10", "DFF", "CPIAUCSL", "DXY")
+$missingCritical = $CRITICAL_IDS | Where-Object { $raw[$_].Count -eq 0 }
+if ($missingCritical) {
+    throw ("Critical series unusable (no fresh data and no cache): {0} - refusing to write data\macro_data.js." -f ($missingCritical -join ", "))
 }
 
 # 30-Day Fed Funds futures (ZQ, CBOT/CME) - one contract per calendar month, next 13 months.
@@ -430,22 +499,31 @@ $yieldCurve = @{
     oneYearAgo    = Get-CurveSnapshot 365
 }
 
-# ===================== Write payload =====================
+# ===================== Write payload (atomic) =====================
+
+$rawSeriesJson = @{}
+foreach ($id in $fredIds) { $rawSeriesJson[$id] = To-SeriesJson $raw[$id] 4 }
+$rawSeriesJson["DXY"] = To-SeriesJson $raw["DXY"] 4
+
+$nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+# FEDTARMD's "dates" are FOMC projection TARGET YEARS (e.g. 2028), not observation dates - years
+# in the future by design. Excluded here so the freshness rollup reflects actual data recency,
+# not a forward-looking projection date.
+$lastObservation = ($raw.Keys | Where-Object { $_ -ne "FEDTARMD" -and $raw[$_].Count -gt 0 } | ForEach-Object { $raw[$_][$raw[$_].Count - 1].Date } | Sort-Object -Descending | Select-Object -First 1)
 
 $payload = @{
-    generatedAtUtc  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    rates           = $rates
-    fedLiquidity    = $fedLiquidity
-    fedExpectations = $fedExpectations
-    inflation       = $inflation
-    fx              = $fx
-    yieldCurve      = $yieldCurve
-    series          = $series
+    generatedAtUtc        = $nowUtc
+    lastSuccessfulRefresh = $nowUtc
+    lastObservation       = $lastObservation
+    sourceStatus          = $sourceStatus
+    rates                 = $rates
+    fedLiquidity          = $fedLiquidity
+    fedExpectations       = $fedExpectations
+    inflation             = $inflation
+    fx                    = $fx
+    yieldCurve            = $yieldCurve
+    series                = $series
+    rawSeries             = $rawSeriesJson
 }
 
-$json = $payload | ConvertTo-Json -Depth 8 -Compress
-$jsOut = "window.MACRO_DATA = $json;"
-$outPath = Join-Path $dataDir "macro_data.js"
-Set-Content -Path $outPath -Value $jsOut -Encoding UTF8
-
-Write-Output "Wrote $outPath"
+Write-DataFileAtomic -Path $outPath -VarName "MACRO_DATA" -Payload $payload -Depth 10
