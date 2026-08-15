@@ -17,6 +17,37 @@
     return typeof n === "number" && isFinite(n) && n > 0;
   }
 
+  var CACHE_KEY = "heimdallLastBtc";
+
+  // Persist the last known-good quote across page loads. A full browser refresh wipes
+  // all in-memory state, so without this a fresh load has nothing to show but the
+  // placeholder dash while the first fetch is in flight or fails (e.g. rate-limited by
+  // rapid repeated refreshes).
+  function readCachedPrice() {
+    try {
+      var raw = window.localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      var cached = JSON.parse(raw);
+      if (!cached || !isValidPrice(cached.price)) return null;
+      return cached;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeCachedPrice(price, change) {
+    try {
+      window.localStorage.setItem(CACHE_KEY, JSON.stringify({
+        price: price,
+        change: (typeof change === "number" && isFinite(change)) ? change : null,
+        ts: Date.now()
+      }));
+    } catch (e) {
+      // localStorage unavailable/full/disabled - live display still works, just no
+      // cross-reload memory this time.
+    }
+  }
+
   var inFlight = false;
 
   function poll() {
@@ -53,6 +84,7 @@
           changeEl.classList.add(chg >= 0 ? "positive" : "negative");
         }
         if (noteEl) noteEl.textContent = "live · updated " + new Date().toLocaleTimeString();
+        writeCachedPrice(px, chg);
       })
       .catch(function () {
         // Fetch failed, timed out, or returned malformed data - retain whatever price
@@ -67,11 +99,22 @@
 
   var mount = document.getElementById("liveBtcMount");
   if (mount) {
-    // Initial placeholder only, shown once before the first fetch ever resolves.
-    // poll() never writes this dash back in once a real price has been displayed.
+    var cached = readCachedPrice();
+    var initialPrice = cached ? fmtUsd(cached.price) : "—";
+    var initialChange = (cached && typeof cached.change === "number")
+      ? (cached.change >= 0 ? "+" : "") + cached.change.toFixed(2) + "% 24h"
+      : "—";
     mount.innerHTML =
-      '<span class="live-price">' + ICON_SVG + '<span class="live-dot"></span><span id="liveBtcPrice">—</span></span>' +
-      '<span class="change" id="liveBtcChange">—</span>';
+      '<span class="live-price">' + ICON_SVG + '<span class="live-dot"></span><span id="liveBtcPrice">' + initialPrice + '</span></span>' +
+      '<span class="change" id="liveBtcChange">' + initialChange + '</span>';
+
+    if (cached && typeof cached.change === "number") {
+      document.getElementById("liveBtcChange").classList.add(cached.change >= 0 ? "positive" : "negative");
+    }
+    // liveBtcNote is a pre-existing static element on some pages (not created here) -
+    // only touch it if present, same as poll() already does.
+    var noteEl0 = document.getElementById("liveBtcNote");
+    if (noteEl0 && cached) noteEl0.textContent = "last known · " + new Date(cached.ts).toLocaleTimeString();
   }
 
   poll();
