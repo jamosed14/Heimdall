@@ -1,0 +1,114 @@
+---
+description: Heimdall Catallaxy engineering conventions - read before editing any file in this project
+globs:
+alwaysApply: true
+---
+
+# Heimdall Catallaxy
+
+A personal, local-only market/macro dashboard (static HTML/CSS/JS, no server, no build step,
+opened via `file://` and also deployed to GitHub Pages). Purpose: check BTC, rates, Fed/liquidity,
+inflation, dollar/FX, credit, energy, and AI-buildout signals in ~30 seconds, then drill into a
+tab. It is explicitly **not** a day-trading terminal, a news aggregator, or a metrics dump — every
+card/chart/indicator must earn its place. Signal over quantity, always.
+
+## Non-negotiable data rules
+
+- **Fail stale, never broken.** If a fetch fails, returns malformed data, or has nothing new,
+  retain the last known-good cached value. Never blank, zero, or show a broken-looking state
+  when valid cached data still exists. "No new data" (weekends, holidays, unchanged prints) is
+  expected, not an error — don't manufacture change.
+- **Never fabricate data.** No plausible-looking placeholder numbers, ever. Missing = "—" and
+  say so, not a guessed value.
+- **Never coerce missing values to zero.** Null/NaN/empty is "missing," not "0".
+- **Validate before overwrite, write atomically.** Every `fetch_*.ps1` script dot-sources
+  `fetch_common.ps1` for this — `Test-SeriesSane`, `Get-ValidatedMergedSeries`,
+  `Write-DataFileAtomic`. Use these, don't hand-roll new validate/merge/write logic.
+- **Full-history refetch, not incremental**, for time-series fetches — every run pulls the
+  entire available history from source, so a gap in refresh runs never creates a gap in data.
+  Live cross-sectional snapshots (CME basis, the GEX options-chain snapshot) are the one
+  exception — those aren't a mergeable series, so on failure just leave the existing cached
+  snapshot file untouched rather than merging/trimming.
+- **Verify a source's literal units before scaling anything.** Don't assume from a field name.
+  Real bugs already happened here: EIA `sales` field is million kWh (not GWh, no scaling needed,
+  a same-session bug divided by 1000 anyway), a nominal-vs-real GDP mismatch, an inverted
+  purchasing-power formula, a misread FRED "as of" date.
+
+## Reuse over duplication (hard rule)
+
+One shared component per concern, reused by every tab that needs it — never let a page roll its
+own version:
+- `charts.js` — time-series line chart (range toggle, log toggle, CSV export)
+- `format.js` — `applyTooltip`/`obsTooltip` (standard tooltip), `downloadCsv`/`downloadSeriesCsv`
+- `nav.js` — tab bar, rendered from one `PAGES` array (add a tab here, not per-HTML-file), plus
+  the keyboard shortcuts (←/→ step tabs, Home→Summary, B→BTC)
+- `ticker.js` — the live BTC price ticker. Also mirrors its validated price into any element
+  tagged `.btc-live-mirror` anywhere on the page (single source of truth, no per-page polling),
+  and syncs across open browser tabs instantly via the `storage` event instead of each tab
+  drifting on its own poll timer.
+- `fetch_common.ps1` — shared validate/merge/atomic-write library for every fetch script
+
+A genuinely different chart *shape* (e.g. the GEX by-strike bar chart, which is categorical, not
+time-series) is a legitimate reason to write a standalone Chart.js config — don't force it through
+`charts.js`. Reuse applies to same-shape things, not as a rule to distort a different chart into.
+
+## Tooltip convention (do not break)
+
+Every number's hover tooltip ends with exactly: `Observation: <date> · Heimdall checked: <fetch
+time>`. If a card already has other tooltip content (a calc-methodology explanation, etc.), that
+explanation stays first and the provenance note is **appended after it**, never prepended. Use
+`HeimdallFormat.applyTooltip(labelEl, obsDate, freq, generatedAtUtc)` — don't hand-roll this.
+
+## Modeled/estimated metrics need a `calc` badge
+
+Anything Heimdall computes rather than sources directly (Net Liquidity Proxy on the Fed tab,
+Dealer Gamma Exposure on the BTC tab) gets a `calc-badge` and a methodology tooltip explaining
+the assumption it rests on. Never present a derived estimate as if it were an observed fact —
+e.g. GEX's "dealers net long calls/short puts" is a standard industry convention, not verified
+dealer positioning, and the UI says so.
+
+## PowerShell 5.1 gotchas (real bugs already caught here — don't reintroduce)
+
+- `Write-Output` inside a function becomes part of its **return value**. Use `Write-Host` for
+  diagnostic/log lines inside any function whose return value matters.
+- `ConvertFrom-Json -Depth N` is **not supported on Windows PowerShell 5.1** — omit `-Depth`.
+- `$var = , (pipeline)` on a **plain assignment** double-wraps the result. The leading comma is
+  only correct inside a `return` statement (to stop PowerShell unrolling an array return value).
+- Every `Invoke-RestMethod`/`Invoke-WebRequest` call needs `-TimeoutSec 30` (or similar) — one
+  hung call with no timeout has already caused a real test run to hang.
+- `Sort-Object -Property <name> -Descending` on an array of **hashtables** can silently sort
+  ascending. Use `[PSCustomObject]` instead of `@{}`, or do a manual max-find loop.
+- `key = (if (cond) {a} else {b})` — parenthesized if-expression inside a hashtable literal —
+  fails to parse. Drop the wrapping parens.
+- GitHub Actions cron is fixed UTC with no DST awareness — see `.github/workflows/refresh.yml`
+  for the pattern (fire at both EDT/EST UTC equivalents, gate at runtime with DST-aware
+  `TimeZoneInfo`, `America/New_York` on Linux runners with a `Eastern Standard Time` fallback
+  for portability). Windows Task Scheduler triggers don't need this — they track local wall
+  clock (incl. DST) natively.
+
+## New data sources
+
+Check FRED first — it covers most macro/Fed data for free. If a genuinely new source is needed
+and requires an API key, that's the user's call to register for, never done autonomously. If a
+source has **no free/self-serve tier at all** (confirmed for CME CF BRRNY and FINRA TRACE — both
+licensed/paid-only), say so plainly and propose a free alternative rather than quietly
+substituting one or scraping around the paywall. A scraped HTML page (no API contract, breaks
+silently on redesign) is a last resort, not a default — flag it as fragile before building on it.
+
+## Verification bar
+
+Load the actual change in a browser before calling it done — read the diff is not enough. This
+project's dev loop: a scratchpad `test_server.ps1` (HttpListener on :8843, needed for `http://`
+vs `file://` load-order differences during dev), check console for errors, and assert
+structurally (element text, chart existence) rather than trusting a screenshot alone. For
+anything involving retry/backoff/fail-stale logic, actually simulate the failure (mock `fetch`,
+point a script at a dead endpoint) rather than reasoning about it abstractly — this has caught
+real bugs that code review alone would have missed.
+
+## Don't, without explicit instruction
+
+Redesign the whole site, change the nav structure wholesale, migrate frameworks, replace a
+working data source casually, add authentication/backend/database, add AI-generated commentary
+or trading recommendations, or add a metric just because a source makes it available. When in
+doubt: preserve and refine, smallest coherent change, ask rather than guess on anything
+consequential or irreversible.
