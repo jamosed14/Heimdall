@@ -1,0 +1,39 @@
+name: BTC Fast refresh (Deribit GEX, hourly 24/7)
+
+# Hourly, every day, all day, all year - no DST gating needed for a plain "every hour" cadence.
+# Deribit's options chain is a live cross-sectional snapshot with genuine value in refreshing
+# continuously, since crypto derivatives never close.
+#
+# Deliberately NOT where the canonical BTC daily-close / 200W MA / ATH / realized-vol pipeline
+# lives - that's a full paginated Coinbase history refetch (~15 requests) per the project's
+# "full-history refetch, not incremental" rule, and none of those derived stats (a weekly-
+# resampled MA, an all-time high, trailing 30/90D vol) meaningfully change hour to hour. That
+# pipeline runs once daily instead - see fetch_btc_data.ps1 in refresh-slow.yml.
+#
+# The genuinely-live BTC price shown throughout the site (header ticker + every mirrored tile)
+# is separately handled by ticker.js polling CoinGecko client-side every 45s - this workflow has
+# nothing to do with that either. This workflow's only job is the Deribit GEX snapshot.
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: heimdall-data-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run fetch_gex_data.ps1
+        shell: pwsh
+        run: ./fetch_gex_data.ps1
+
+      - uses: ./.github/actions/commit-push-retry

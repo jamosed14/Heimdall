@@ -1,0 +1,33 @@
+name: "Commit and push data changes with retry"
+description: >
+  Commits any changed data/*.js files and pushes to main, retrying after a pull --rebase if the
+  push is rejected. Shared by all three refresh cadence workflows (BTC Fast, Market Fast, Slow)
+  so this logic exists once, not three times. A shared `concurrency` group across all three
+  workflows already serializes them against each other, so this retry is defense-in-depth (a
+  manual local push landing at the same moment, a workflow_dispatch overlapping a scheduled
+  run) rather than the primary safeguard. Since each cadence class only ever writes its own
+  distinct data/*.js files, a rebase here can never hit a real content conflict - only ever a
+  timing one - so retrying is always safe.
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        git config user.name "heimdall-refresh-bot"
+        git config user.email "actions@github.com"
+        git add data/*.js
+        if git diff --cached --quiet; then
+          echo "No data changes - skipping commit."
+          exit 0
+        fi
+        git commit -m "Data refresh $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        for i in 1 2 3; do
+          if git push; then
+            echo "Pushed successfully."
+            exit 0
+          fi
+          echo "Push rejected (attempt $i/3) - pulling/rebasing and retrying..."
+          git pull --rebase origin main
+        done
+        echo "::error::Failed to push after 3 attempts."
+        exit 1

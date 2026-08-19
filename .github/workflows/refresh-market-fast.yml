@@ -1,0 +1,70 @@
+name: Market Fast refresh (Yahoo DXY/futures + FRED, hourly weekdays)
+
+# Target: 9:35, 10:35, 11:35, 12:35, 13:35, 14:35, 15:35 ET (every hour on :35) plus a 4:10 PM ET
+# close pass, weekdays only. Runs fetch_macro_data.ps1 only.
+#
+# IMPORTANT: only part of that script's own payload is genuinely intraday. Its Yahoo-sourced
+# pieces (DXY, ZQ Fed Funds futures for the implied policy path) are live market quotes and
+# really do refresh each run. Its FRED-sourced pieces (Treasury yields, Fed balance sheet,
+# CPI/PCE, M2, dot plot, EFFR/DFF, SOFR) are confirmed single-daily-print series - verified
+# directly against FRED's own series metadata before this schedule was built (DGS10:
+# frequency=Daily; DFF: frequency="Daily, 7-Day"; SOFR: frequency=Daily; ICE BofA OAS series:
+# frequency="Daily, Close"). Running this hourly doesn't make those series more real-time; it
+# just means the merge-by-date fail-stale logic correctly no-ops on them between the once-daily
+# FRED publish, exactly as it would on any cadence. Don't describe DFF/SOFR themselves as "live"
+# just because ZQ futures (expected future policy) riding along in the same script are - a daily
+# fixing and a live futures quote are different animals even when they cover the same rate.
+#
+# GitHub Actions cron is fixed UTC with no DST awareness. This fires every hour on the UTC :35
+# mark (covering all 7 EDT/EST variants of the 9:35-3:35 ET passes with one cron line) plus two
+# explicit UTC times for the 4:10 PM ET close pass (EDT/EST variants), and the runtime gate
+# below uses .NET's DST-aware TimeZoneInfo to decide whether the current moment is actually
+# within a real target window before doing anything - exact year-round, not an approximation.
+
+on:
+  schedule:
+    - cron: "35 * * * *"    # every hour at :35 UTC - covers all DST variants of 9:35-15:35 ET
+    - cron: "10 20 * * *"   # 4:10 PM ET close pass during EDT (UTC-4)
+    - cron: "10 21 * * *"   # 4:10 PM ET close pass during EST (UTC-5)
+  workflow_dispatch: {}
+
+concurrency:
+  group: heimdall-data-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check scheduled pass
+        id: gate
+        if: github.event_name == 'schedule'
+        shell: pwsh
+        run: |
+          try {
+            $etTz = [System.TimeZoneInfo]::FindSystemTimeZoneById("America/New_York")
+          } catch {
+            $etTz = [System.TimeZoneInfo]::FindSystemTimeZoneById("Eastern Standard Time")
+          }
+          $etNow = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $etTz)
+          $isWeekday = $etNow.DayOfWeek -ne [System.DayOfWeek]::Saturday -and $etNow.DayOfWeek -ne [System.DayOfWeek]::Sunday
+          $isHourlyWindow = ($etNow.Hour -ge 9 -and $etNow.Hour -le 15 -and $etNow.Minute -ge 30 -and $etNow.Minute -le 40)
+          $isCloseWindow = ($etNow.Hour -eq 16 -and $etNow.Minute -ge 5 -and $etNow.Minute -le 15)
+          $shouldRun = $isWeekday -and ($isHourlyWindow -or $isCloseWindow)
+          Write-Host ("ET now: {0} ({1}) - hourly window: {2}, close window: {3}, weekday: {4} -> shouldRun: {5}" -f `
+            $etNow.ToString("yyyy-MM-dd HH:mm"), $etNow.DayOfWeek, $isHourlyWindow, $isCloseWindow, $isWeekday, $shouldRun)
+          "shouldRun=$($shouldRun.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Run fetch_macro_data.ps1
+        if: github.event_name != 'schedule' || steps.gate.outputs.shouldRun == 'true'
+        shell: pwsh
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: ./fetch_macro_data.ps1
+
+      - uses: ./.github/actions/commit-push-retry

@@ -1,0 +1,85 @@
+name: Slow refresh (BTC canonical close, Credit, Energy, AI - once daily)
+
+# Once daily, 06:00 UTC - comfortably after UTC midnight so blockchain-adjacent/EIA/SEC daily
+# sources have published, independent of any single timezone. No DST-aware gating needed here
+# (unlike the two hourly workflows) since a once-daily job doesn't need wall-clock ET precision,
+# just "sometime after the prior day's data exists."
+#
+# What lives here and why:
+#   - fetch_btc_data.ps1: the CANONICAL BTC daily-close pipeline (200W MA, ATH, drawdown,
+#     30D/90D realized vol, full historical chart) - a full paginated Coinbase history refetch
+#     per the project's "full-history refetch, not incremental" rule. None of those derived
+#     stats meaningfully change hour to hour, so this runs once a day, not as part of the
+#     hourly BTC Fast workflow (refresh-btc-fast.yml, which only handles the Deribit GEX
+#     snapshot). This is deliberately kept separate from "hourly BTC updates" - the live price
+#     shown throughout the site is a different thing entirely (ticker.js polling CoinGecko
+#     client-side every 45s), and conflating "latest price" with "canonical daily close" would
+#     make the historical series' semantics fuzzy.
+#   - fetch_credit_data.ps1 (FRED ICE BofA OAS series) and fetch_energy_data.ps1 (EIA spot
+#     prices/inventories): confirmed zero live component in either source - EIA's petroleum
+#     pricing API only offers daily/weekly/monthly frequencies, no live futures feed - so
+#     there's no freshness left on the table by polling more than once a day.
+#   - fetch_ai_data.ps1 (SEC EDGAR quarterly filings, FRED semiconductor/PPI series, EIA
+#     electricity sales): all inherently slow-moving, no benefit from more frequent polling.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: heimdall-data-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Source isolation: each script runs in its own try/catch so one failing (e.g. SEC EDGAR
+      # blocking this runner's IP) never prevents the others from updating. Each script already
+      # guarantees it never writes corrupted output itself (validate-before-overwrite + atomic
+      # temp-file-then-rename inside fetch_common.ps1) - this loop's job is purely to keep going
+      # past a failure and log it loudly, not to protect file integrity itself.
+      - name: Run fetch scripts
+        id: fetch
+        shell: pwsh
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: |
+          $scripts = @("fetch_btc_data.ps1", "fetch_credit_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1")
+          $failed = @()
+          foreach ($script in $scripts) {
+            Write-Host "::group::Running $script"
+            try {
+              & "./$script"
+              Write-Host "$script completed"
+            } catch {
+              Write-Host ("::error::{0} FAILED - {1}" -f $script, $_.Exception.Message)
+              $failed += $script
+            }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host ("::error::{0} of {1} fetch scripts failed: {2}" -f $failed.Count, $scripts.Count, ($failed -join ", "))
+            "failed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "failed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - uses: ./.github/actions/commit-push-retry
+        if: always()
+
+      # Marks the job/run as failed (visible red X, alertable) if anything went wrong above -
+      # separate from the commit step so a partial failure is loud without blocking whatever
+      # did succeed from being published.
+      - name: Fail job if any fetch script errored
+        if: steps.fetch.outputs.failed == 'true'
+        run: |
+          echo "One or more fetch scripts failed this run - see the 'Run fetch scripts' step log above for ::error:: details. Data that DID succeed was still committed."
+          exit 1
