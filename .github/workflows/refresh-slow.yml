@@ -65,11 +65,13 @@ jobs:
             }
             Write-Host "::endgroup::"
           }
+          # Add-Content with explicit -Encoding utf8, not Out-File - see refresh-market-fast.yml
+          # for why (Out-File's pwsh/Linux encoding defaults can silently corrupt GITHUB_OUTPUT).
           if ($failed.Count -gt 0) {
             Write-Host ("::error::{0} of {1} fetch scripts failed: {2}" -f $failed.Count, $scripts.Count, ($failed -join ", "))
-            "failed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=true" -Encoding utf8
           } else {
-            "failed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=false" -Encoding utf8
           }
 
       - uses: ./.github/actions/commit-push-retry

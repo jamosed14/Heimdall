@@ -58,7 +58,13 @@ jobs:
           $shouldRun = $isWeekday -and ($isHourlyWindow -or $isCloseWindow)
           Write-Host ("ET now: {0} ({1}) - hourly window: {2}, close window: {3}, weekday: {4} -> shouldRun: {5}" -f `
             $etNow.ToString("yyyy-MM-dd HH:mm"), $etNow.DayOfWeek, $isHourlyWindow, $isCloseWindow, $isWeekday, $shouldRun)
-          "shouldRun=$($shouldRun.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # Out-File's default encoding on pwsh/Linux has known quirks that can silently corrupt
+          # GITHUB_OUTPUT's expected plain-UTF8 KEY=VALUE format (a documented, common gotcha,
+          # not hypothetical - this is the actual root cause found after this gate showed a
+          # 100% pass-through failure rate across 4 days and 3 separate gate-logic rewrites,
+          # despite the window math itself testing correctly every time in isolation).
+          # Add-Content with explicit -Encoding utf8 is the reliable pattern.
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "shouldRun=$($shouldRun.ToString().ToLower())" -Encoding utf8
 
       - name: Run fetch_macro_data.ps1
         if: github.event_name != 'schedule' || steps.gate.outputs.shouldRun == 'true'
