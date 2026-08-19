@@ -53,11 +53,30 @@ jobs:
           }
           $etNow = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $etTz)
           $isWeekday = $etNow.DayOfWeek -ne [System.DayOfWeek]::Saturday -and $etNow.DayOfWeek -ne [System.DayOfWeek]::Sunday
-          $isHourlyWindow = ($etNow.Hour -ge 9 -and $etNow.Hour -le 15 -and $etNow.Minute -ge 30 -and $etNow.Minute -le 40)
-          $isCloseWindow = ($etNow.Hour -eq 16 -and $etNow.Minute -ge 5 -and $etNow.Minute -le 15)
-          $shouldRun = $isWeekday -and ($isHourlyWindow -or $isCloseWindow)
-          Write-Host ("ET now: {0} ({1}) - hourly window: {2}, close window: {3}, weekday: {4} -> shouldRun: {5}" -f `
-            $etNow.ToString("yyyy-MM-dd HH:mm"), $etNow.DayOfWeek, $isHourlyWindow, $isCloseWindow, $isWeekday, $shouldRun)
+
+          # GitHub Actions scheduled (cron) triggers are documented to be delayed - sometimes by
+          # 10-20+ minutes, especially for a workflow that was just created/edited - so a tight
+          # +-5min tolerance around each checkpoint was rejecting legitimate runs outright
+          # (confirmed in production: two consecutive real firings both landed outside a +-5min
+          # window and got skipped). Checked against each of the 8 explicit target checkpoints
+          # individually with a +-20min tolerance, rather than one broad per-hour range - a broad
+          # range was tried first and rejected because it let the *other* DST variant's close-
+          # pass cron entry (e.g. the EDT-targeted 20:10 UTC firing landing at 3:10pm ET during
+          # EST) bleed into the hourly window. Checkpoints are spaced >=25min apart at their
+          # closest, so a +-20min tolerance per checkpoint can never double-match two neighbors.
+          $checkpoints = @(
+            @{ H = 9;  M = 35 }, @{ H = 10; M = 35 }, @{ H = 11; M = 35 }, @{ H = 12; M = 35 },
+            @{ H = 13; M = 35 }, @{ H = 14; M = 35 }, @{ H = 15; M = 35 }, @{ H = 16; M = 10 }
+          )
+          $nowMinutes = $etNow.Hour * 60 + $etNow.Minute
+          $nearCheckpoint = $false
+          foreach ($cp in $checkpoints) {
+            $cpMinutes = $cp.H * 60 + $cp.M
+            if ([math]::Abs($nowMinutes - $cpMinutes) -le 20) { $nearCheckpoint = $true; break }
+          }
+          $shouldRun = $isWeekday -and $nearCheckpoint
+          Write-Host ("ET now: {0} ({1}) - near a checkpoint: {2}, weekday: {3} -> shouldRun: {4}" -f `
+            $etNow.ToString("yyyy-MM-dd HH:mm"), $etNow.DayOfWeek, $nearCheckpoint, $isWeekday, $shouldRun)
           # Out-File's default encoding on pwsh/Linux has known quirks that can silently corrupt
           # GITHUB_OUTPUT's expected plain-UTF8 KEY=VALUE format (a documented, common gotcha,
           # not hypothetical - this is the actual root cause found after this gate showed a
