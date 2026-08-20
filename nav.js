@@ -11,7 +11,8 @@
     { key: "fx", label: "Dollar & FX", href: "Dollar & FX.html" },
     { key: "credit", label: "Credit", href: "Credit.html" },
     { key: "energy", label: "Energy", href: "Energy.html" },
-    { key: "ai", label: "AI Buildout", href: "AI.html" }
+    { key: "ai", label: "AI Buildout", href: "AI.html" },
+    { key: "equities", label: "Equities", href: "Equities.html" }
   ];
 
   var mount = document.getElementById("nav");

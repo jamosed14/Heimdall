@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall Catallaxy — Equities</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-left"><span class="symbol">EQUITIES</span><span id="liveBtcMount"></span></div>
+  <div class="note" id="asOfNote">—</div>
+</div>
+
+<div class="container">
+  <div class="brand-row">
+    <span class="brand-title">Heimdall <span class="brand-accent">Catallaxy</span></span>
+  </div>
+  <div class="brand-quote">
+    <div class="quote-text">In the short run, the market is a voting machine, but in the long run it is a weighing machine.</div>
+    <div class="quote-attribution">— Benjamin Graham</div>
+  </div>
+
+  <div id="nav"></div>
+
+  <div class="section-heading">Bitcoin Proxies</div>
+  <div class="section-sub">Equity/preferred exposure to Bitcoin balance-sheet strategy, not BTC itself — see the BTC tab for spot.</div>
+  <div class="stat-grid" id="group-btc-proxy"></div>
+
+  <div class="section-heading">AI Hyperscalers</div>
+  <div class="section-sub">Same six names tracked for capex/revenue on the AI tab — this is their equity price, not their fundamentals.</div>
+  <div class="stat-grid" id="group-hyperscaler"></div>
+
+  <div class="footer-note" id="generatedNote"></div>
+</div>
+
+<script>window.HEIMDALL_PAGE = "equities";</script>
+<script src="nav.js"></script>
+<script src="format.js"></script>
+<script src="data/equities_data.js"></script>
+<script src="equities_app.js"></script>
+<script src="ticker.js"></script>
+</body>
+</html>

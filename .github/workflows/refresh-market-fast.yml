@@ -1,7 +1,10 @@
-name: Market Fast refresh (Yahoo DXY/futures + FRED, hourly weekdays)
+name: Market Fast refresh (Yahoo DXY/futures/equities + FRED, hourly weekdays)
 
 # Target: 9:35, 10:35, 11:35, 12:35, 13:35, 14:35, 15:35 ET (every hour on :35) plus a 4:10 PM ET
-# close pass, weekdays only. Runs fetch_macro_data.ps1 only.
+# close pass, weekdays only. Runs fetch_macro_data.ps1 and fetch_equities_data.ps1 - both are
+# genuinely intraday-live Yahoo-sourced data (equities added 2026-08-20 for the Equities tab:
+# MSTR/STRC bitcoin proxies + the six AI hyperscalers), so they share this cadence rather than
+# fragmenting into a fourth workflow.
 #
 # IMPORTANT: only part of that script's own payload is genuinely intraday. Its Yahoo-sourced
 # pieces (DXY, ZQ Fed Funds futures for the implied policy path) are live market quotes and
@@ -85,11 +88,40 @@ jobs:
           # Add-Content with explicit -Encoding utf8 is the reliable pattern.
           Add-Content -Path $env:GITHUB_OUTPUT -Value "shouldRun=$($shouldRun.ToString().ToLower())" -Encoding utf8
 
-      - name: Run fetch_macro_data.ps1
+      # Source isolation: fetch_equities_data.ps1 failing (e.g. Yahoo blocking this runner) never
+      # blocks fetch_macro_data.ps1 from updating, and vice versa.
+      - name: Run fetch scripts
+        id: fetch
         if: github.event_name != 'schedule' || steps.gate.outputs.shouldRun == 'true'
         shell: pwsh
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: ./fetch_macro_data.ps1
+        run: |
+          $scripts = @("fetch_macro_data.ps1", "fetch_equities_data.ps1")
+          $failed = @()
+          foreach ($script in $scripts) {
+            Write-Host "::group::Running $script"
+            try {
+              & "./$script"
+              Write-Host "$script completed"
+            } catch {
+              Write-Host ("::error::{0} FAILED - {1}" -f $script, $_.Exception.Message)
+              $failed += $script
+            }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host ("::error::{0} of {1} fetch scripts failed: {2}" -f $failed.Count, $scripts.Count, ($failed -join ", "))
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=true" -Encoding utf8
+          } else {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=false" -Encoding utf8
+          }
 
       - uses: ./.github/actions/commit-push-retry
+        if: always()
+
+      - name: Fail job if any fetch script errored
+        if: steps.fetch.outputs.failed == 'true'
+        run: |
+          echo "One or more fetch scripts failed this run - data that DID succeed was still committed."
+          exit 1
