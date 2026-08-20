@@ -25,7 +25,13 @@
     return '<a href="' + p.href.replace(/&/g, "&amp;") + '"' + cls + ">" + p.label + "</a>";
   }).join("");
 
-  // ---------- Keyboard nav: Left/Right steps tabs, Home jumps Summary, B jumps BTC ----------
+  // ---------- Keyboard nav: Left/Right steps tabs, Home jumps Summary, letter keys jump tabs ----------
+  // First letter of each tab, except Equities (E is taken by Energy) -> Q.
+  var KEY_SHORTCUTS = {
+    s: "summary", b: "btc", r: "rates", f: "fed", i: "inflation",
+    d: "fx", c: "credit", e: "energy", a: "ai", q: "equities"
+  };
+
   function isTypingTarget(el) {
     if (!el) return false;
     if (el.isContentEditable) return true;
@@ -56,9 +62,9 @@
     } else if (e.key === "Home") {
       e.preventDefault();
       goTo("summary");
-    } else if (e.key === "b" || e.key === "B") {
-      e.preventDefault();
-      goTo("btc");
+    } else {
+      var target = KEY_SHORTCUTS[e.key.toLowerCase()];
+      if (target) { e.preventDefault(); goTo(target); }
     }
   });
 })();
