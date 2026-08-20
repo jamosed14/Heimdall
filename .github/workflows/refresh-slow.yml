@@ -1,4 +1,4 @@
-name: Slow refresh (BTC canonical close, Credit, Energy, AI - once daily)
+name: Slow refresh (BTC canonical close, Credit, Energy, AI, CDS - once daily)
 
 # Once daily, 06:00 UTC - comfortably after UTC midnight so blockchain-adjacent/EIA/SEC daily
 # sources have published, independent of any single timezone. No DST-aware gating needed here
@@ -21,6 +21,10 @@ name: Slow refresh (BTC canonical close, Credit, Energy, AI - once daily)
 #     there's no freshness left on the table by polling more than once a day.
 #   - fetch_ai_data.ps1 (SEC EDGAR quarterly filings, FRED semiconductor/PPI series, EIA
 #     electricity sales): all inherently slow-moving, no benefit from more frequent polling.
+#   - fetch_cds_data.ps1 (ICE Clear Credit daily settlement prices -> ISDA CDS Standard Model
+#     conventional spread, for the AI tab's Hyperscaler Credit section, added 2026-08-20): ICE
+#     only publishes one settlement print per day, so there's nothing to gain from polling more
+#     often than this.
 
 on:
   schedule:
@@ -52,7 +56,7 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
         run: |
-          $scripts = @("fetch_btc_data.ps1", "fetch_credit_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1")
+          $scripts = @("fetch_btc_data.ps1", "fetch_credit_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1", "fetch_cds_data.ps1")
           $failed = @()
           foreach ($script in $scripts) {
             Write-Host "::group::Running $script"

@@ -95,6 +95,33 @@
       "Capex/revenue standalone-quarter figures are derived by Heimdall where a company files cash-flow amounts YTD-cumulative (standalone = this period minus the prior cumulative period within the same fiscal year). MSFT and ORCL have non-calendar fiscal years, so the aggregate above sums each company's own most recent quarter/TTM rather than assuming a shared calendar quarter exists. Full tag-by-tag sourcing is in the table below.";
   }
 
+  // ---------- HYPERSCALER CREDIT (single-name CDS) ----------
+  var CDS_METHODOLOGY_TIP =
+    "ICE Clear Credit daily settlement price (clean price, 100bp fixed coupon), converted to a " +
+    "conventional spread using the official ISDA CDS Standard Model converter (built and hosted " +
+    "by IHS Markit in collaboration with S&P Global) - the actual production model, not a " +
+    "Heimdall approximation. 40% recovery rate assumption, standard convention for senior " +
+    "unsecured. Verified against independently-reported spread levels before shipping.";
+
+  function renderCredit() {
+    var el = document.getElementById("group-credit");
+    if (!el) return; // section not present on this page build
+    var CDS = window.CDS_DATA;
+    if (!CDS || !CDS.tickers) {
+      el.innerHTML = '<div class="stat-card"><div class="stat-label">Hyperscaler Credit</div><div class="stat-value">—</div><div class="stat-sub">no cached data — run fetch_cds_data.ps1</div></div>';
+      return;
+    }
+    var order = Object.keys(CDS.tickers).sort(function (a, b) {
+      return CDS.tickers[b].spreadBp - CDS.tickers[a].spreadBp;
+    });
+    order.forEach(function (ticker, i) {
+      var t = CDS.tickers[ticker];
+      var sub = t.cleanPrice.toFixed(2) + "% clean price · matures " + t.maturityDate;
+      statCard(el, ticker + " 5Y CDS", t.spreadBp.toFixed(1) + " bp", sub,
+        undefined, t.asOfDate, "daily", i === 0 ? CDS_METHODOLOGY_TIP : null);
+    });
+  }
+
   function renderCompanyBreakdown() {
     var tbody = document.getElementById("companyBreakdownBody");
     var cap = DATA.capital;
@@ -269,6 +296,10 @@
       return '<div class="watch-entry"><span class="watch-date">' + entry.date + '</span><span class="watch-category">' + entry.category + '</span><span class="watch-text">' + textHtml + '</span></div>';
     }).join("");
   }
+
+  // CDS_DATA is a separate cache from AI_DATA (different fetch script, different cadence) -
+  // rendered independently so one being unavailable never blocks the other.
+  renderCredit();
 
   if (!DATA) {
     document.getElementById("asOfNote").textContent = "no cached data — run fetch_ai_data.ps1";
