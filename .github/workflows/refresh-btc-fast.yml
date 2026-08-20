@@ -19,8 +19,14 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch: {}
 
+# Own concurrency group, not shared with the other refresh workflows - see commit-push-retry's
+# doc comment for why that's safe. A shared group across all refresh workflows was the original
+# design and was rejected once it was confirmed to be the actual cause of this workflow's hourly
+# cron landing every ~2 hours instead of hourly: GitHub Actions concurrency groups only hold one
+# pending run at a time, so with multiple workflows queuing into one group, a newly-queued run
+# evicts whichever run was already waiting.
 concurrency:
-  group: heimdall-data-refresh
+  group: heimdall-btc-fast
   cancel-in-progress: false
 
 permissions:

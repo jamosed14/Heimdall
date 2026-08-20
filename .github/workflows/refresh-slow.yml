@@ -31,8 +31,12 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch: {}
 
+# Own concurrency group, not shared with the other refresh workflows - see commit-push-retry's
+# doc comment and refresh-btc-fast.yml's comment for why a shared group was rejected (GitHub
+# only holds one pending run per concurrency group, so multiple workflows sharing one group
+# evict each other's queued runs under contention).
 concurrency:
-  group: heimdall-data-refresh
+  group: heimdall-slow
   cancel-in-progress: false
 
 permissions:

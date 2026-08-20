@@ -14,7 +14,10 @@
 # not something to build commercial/redistributed use on. Real firms use licensed data
 # (Bloomberg/Refinitiv/ICE) for exactly that reason - contractual usage rights, SLAs, audit
 # trail. Explicitly not a live tick feed; "regularMarketPrice" is Yahoo's own consolidated
-# quote, refreshed on this project's normal Market Fast cadence (hourly weekdays), not real-time.
+# quote. Runs on its own Equities Fast workflow (refresh-equities-fast.yml, 15-min cadence,
+# 4am-8pm ET weekdays covering pre-market/regular/after-hours), split out from Market Fast on
+# 2026-08-20 so this could refresh faster than the FRED-bundled series it used to share a
+# schedule with.
 #
 # Each ticker is validated and merged independently (source isolation) - one bad/blocked ticker
 # never blocks the other seven. "range=max" was tested and found unreliable for at least one
@@ -121,6 +124,29 @@ foreach ($w in $WATCHLIST) {
         $wk52Hi = $e.wk52Hi; $wk52Lo = $e.wk52Lo; $shortName = $e.shortName
     }
 
+    # Pre/post-market: Yahoo's meta only populates preMarketPrice/postMarketPrice while the
+    # market is actually in that session (marketState "PRE"/"POST") - outside those windows
+    # (including during regular hours) these fields are simply absent, which is the correct
+    # fail-stale behavior here, not a bug to work around. Deliberately kept as a distinct field
+    # rather than blended into `price` - extended-hours prints are thin-volume/wide-spread and
+    # shouldn't be presented with the same weight as a regular-session quote.
+    $extHours = $null
+    if ($meta -and $meta.marketState -eq "PRE" -and $null -ne $meta.preMarketPrice) {
+        $extHours = @{
+            session = "pre"
+            price   = [math]::Round([double]$meta.preMarketPrice, 2)
+            chgPct  = if ($null -ne $meta.preMarketChangePercent) { [math]::Round([double]$meta.preMarketChangePercent, 2) } else { $null }
+            asOfUtc = if ($null -ne $meta.preMarketTime) { [DateTimeOffset]::FromUnixTimeSeconds([int64]$meta.preMarketTime).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ") } else { $null }
+        }
+    } elseif ($meta -and $meta.marketState -eq "POST" -and $null -ne $meta.postMarketPrice) {
+        $extHours = @{
+            session = "post"
+            price   = [math]::Round([double]$meta.postMarketPrice, 2)
+            chgPct  = if ($null -ne $meta.postMarketChangePercent) { [math]::Round([double]$meta.postMarketChangePercent, 2) } else { $null }
+            asOfUtc = if ($null -ne $meta.postMarketTime) { [DateTimeOffset]::FromUnixTimeSeconds([int64]$meta.postMarketTime).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ") } else { $null }
+        }
+    }
+
     $series = $seriesResult.series | ForEach-Object { @{ d = $_.Date; c = [math]::Round($_.Value, 4) } }
 
     $tickersOut[$sym] = @{
@@ -131,6 +157,7 @@ foreach ($w in $WATCHLIST) {
         chgPct    = if ($null -ne $chgPct) { [math]::Round($chgPct, 2) } else { $null }
         wk52Hi    = if ($null -ne $wk52Hi) { [math]::Round($wk52Hi, 2) } else { $null }
         wk52Lo    = if ($null -ne $wk52Lo) { [math]::Round($wk52Lo, 2) } else { $null }
+        extHours  = $extHours
         asOfDate  = $seriesResult.series[-1].Date
         series    = $series
     }

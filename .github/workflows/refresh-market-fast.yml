@@ -1,12 +1,12 @@
-name: Market Fast refresh (Yahoo DXY/futures/equities + FRED, hourly weekdays)
+name: Market Fast refresh (Yahoo DXY/futures + FRED, hourly weekdays)
 
 # Target: 9:35, 10:35, 11:35, 12:35, 13:35, 14:35, 15:35 ET (every hour on :35) plus a 4:10 PM ET
-# close pass, weekdays only. Runs fetch_macro_data.ps1 and fetch_equities_data.ps1 - both are
-# genuinely intraday-live Yahoo-sourced data (equities added 2026-08-20 for the Equities tab:
-# MSTR/STRC bitcoin proxies + the six AI hyperscalers), so they share this cadence rather than
-# fragmenting into a fourth workflow.
+# close pass, weekdays only. Runs fetch_macro_data.ps1 only - equities was split out to its own
+# refresh-equities-fast.yml on 2026-08-20 so it could run on a faster (15-min, pre/post-market
+# inclusive) cadence than this FRED-bundled schedule without dragging pointless extra FRED hits
+# along with it (FRED's series here are single-daily-print - see note below).
 #
-# IMPORTANT: only part of that script's own payload is genuinely intraday. Its Yahoo-sourced
+# IMPORTANT: only part of this script's own payload is genuinely intraday. Its Yahoo-sourced
 # pieces (DXY, ZQ Fed Funds futures for the implied policy path) are live market quotes and
 # really do refresh each run. Its FRED-sourced pieces (Treasury yields, Fed balance sheet,
 # CPI/PCE, M2, dot plot, EFFR/DFF, SOFR) are confirmed single-daily-print series - verified
@@ -31,8 +31,15 @@ on:
     - cron: "10 21 * * *"   # 4:10 PM ET close pass during EST (UTC-5)
   workflow_dispatch: {}
 
+# Own concurrency group, not shared with the other refresh workflows - see commit-push-retry's
+# doc comment for why that's safe (each workflow only ever writes its own distinct data/*.js
+# files, so a push race is only ever a timing conflict, never a real content conflict). A shared
+# group was tried first and rejected: GitHub Actions concurrency groups only hold one pending run
+# at a time, so with four workflows queuing into one group, a newly-queued run evicts whichever
+# run was already waiting - confirmed in production as the reason the BTC Fast (GEX) workflow's
+# hourly cron was actually landing every ~2 hours instead of hourly.
 concurrency:
-  group: heimdall-data-refresh
+  group: heimdall-market-fast
   cancel-in-progress: false
 
 permissions:
@@ -88,40 +95,13 @@ jobs:
           # Add-Content with explicit -Encoding utf8 is the reliable pattern.
           Add-Content -Path $env:GITHUB_OUTPUT -Value "shouldRun=$($shouldRun.ToString().ToLower())" -Encoding utf8
 
-      # Source isolation: fetch_equities_data.ps1 failing (e.g. Yahoo blocking this runner) never
-      # blocks fetch_macro_data.ps1 from updating, and vice versa.
-      - name: Run fetch scripts
+      - name: Run fetch_macro_data.ps1
         id: fetch
         if: github.event_name != 'schedule' || steps.gate.outputs.shouldRun == 'true'
         shell: pwsh
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: |
-          $scripts = @("fetch_macro_data.ps1", "fetch_equities_data.ps1")
-          $failed = @()
-          foreach ($script in $scripts) {
-            Write-Host "::group::Running $script"
-            try {
-              & "./$script"
-              Write-Host "$script completed"
-            } catch {
-              Write-Host ("::error::{0} FAILED - {1}" -f $script, $_.Exception.Message)
-              $failed += $script
-            }
-            Write-Host "::endgroup::"
-          }
-          if ($failed.Count -gt 0) {
-            Write-Host ("::error::{0} of {1} fetch scripts failed: {2}" -f $failed.Count, $scripts.Count, ($failed -join ", "))
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=true" -Encoding utf8
-          } else {
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "failed=false" -Encoding utf8
-          }
+        run: ./fetch_macro_data.ps1
 
       - uses: ./.github/actions/commit-push-retry
         if: always()
-
-      - name: Fail job if any fetch script errored
-        if: steps.fetch.outputs.failed == 'true'
-        run: |
-          echo "One or more fetch scripts failed this run - data that DID succeed was still committed."
-          exit 1

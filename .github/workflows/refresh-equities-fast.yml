@@ -1,0 +1,68 @@
+name: Equities Fast refresh (Yahoo quotes, 15-min, pre/regular/post-market weekdays)
+
+# Split out from Market Fast on 2026-08-20 so equities could refresh faster than the FRED-bundled
+# schedule it used to share, and so it could actually capture pre-market/after-hours prints
+# (fetch_equities_data.ps1 now reads meta.preMarketPrice/postMarketPrice when Yahoo's marketState
+# says the ticker is actually in that session).
+#
+# Window: 4:00 AM - 8:00 PM ET, weekdays - covers pre-market (~4am start), regular session
+# (9:30am-4:00pm), and after-hours (~4pm-8pm). Every 15 minutes within that window. Unlike Market
+# Fast's checkpoint-proximity gate (built for sparse hourly targets), this uses a continuous
+# range check since the cadence itself is already uniform - simpler and correct for this shape.
+#
+# Own concurrency group - see commit-push-retry's doc comment and refresh-market-fast.yml's
+# comment for why a shared group across all refresh workflows was rejected (GitHub only holds one
+# pending run per concurrency group, so multiple workflows sharing one group evict each other's
+# queued runs under contention - confirmed as the cause of BTC Fast's hourly cron actually
+# landing every ~2 hours before this split).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: heimdall-equities-fast
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check scheduled pass
+        id: gate
+        if: github.event_name == 'schedule'
+        shell: pwsh
+        run: |
+          try {
+            $etTz = [System.TimeZoneInfo]::FindSystemTimeZoneById("America/New_York")
+          } catch {
+            $etTz = [System.TimeZoneInfo]::FindSystemTimeZoneById("Eastern Standard Time")
+          }
+          $etNow = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $etTz)
+          $isWeekday = $etNow.DayOfWeek -ne [System.DayOfWeek]::Saturday -and $etNow.DayOfWeek -ne [System.DayOfWeek]::Sunday
+
+          $nowMinutes = $etNow.Hour * 60 + $etNow.Minute
+          $startMinutes = 4 * 60    # 4:00 AM ET
+          $endMinutes = 20 * 60     # 8:00 PM ET
+          $inWindow = $nowMinutes -ge $startMinutes -and $nowMinutes -le $endMinutes
+
+          $shouldRun = $isWeekday -and $inWindow
+          Write-Host ("ET now: {0} ({1}) - in 4am-8pm window: {2}, weekday: {3} -> shouldRun: {4}" -f `
+            $etNow.ToString("yyyy-MM-dd HH:mm"), $etNow.DayOfWeek, $inWindow, $isWeekday, $shouldRun)
+          # Add-Content with explicit -Encoding utf8, not Out-File - see refresh-market-fast.yml
+          # for why (Out-File's pwsh/Linux encoding defaults can silently corrupt GITHUB_OUTPUT).
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "shouldRun=$($shouldRun.ToString().ToLower())" -Encoding utf8
+
+      - name: Run fetch_equities_data.ps1
+        if: github.event_name != 'schedule' || steps.gate.outputs.shouldRun == 'true'
+        shell: pwsh
+        run: ./fetch_equities_data.ps1
+
+      - uses: ./.github/actions/commit-push-retry
+        if: always()

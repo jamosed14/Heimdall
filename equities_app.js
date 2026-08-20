@@ -31,9 +31,21 @@
     var wk52 = (t.wk52Lo !== null && t.wk52Hi !== null)
       ? "52wk " + fmtUsd(t.wk52Lo) + " – " + fmtUsd(t.wk52Hi)
       : "";
+    // Extended-hours price is deliberately a small subscript under the regular price, never
+    // blended into stat-value - pre/post-market prints are thin-volume/wide-spread and
+    // shouldn't read with the same visual weight as a regular-session quote.
+    var extHtml = "";
+    if (t.extHours && t.extHours.price !== null && t.extHours.price !== undefined) {
+      var ex = t.extHours;
+      var exCls = ex.chgPct > 0 ? "positive" : ex.chgPct < 0 ? "negative" : "";
+      var exLabel = ex.session === "pre" ? "Pre-mkt" : "After-hours";
+      extHtml = '<div class="stat-subline ' + exCls + '">' + exLabel + " " + fmtUsd(ex.price) +
+        (ex.chgPct !== null && ex.chgPct !== undefined ? " (" + fmtPct(ex.chgPct) + ")" : "") + "</div>";
+    }
     card.innerHTML =
       '<div class="stat-label">' + sym + " · " + t.name + '</div>' +
       '<div class="stat-value">' + fmtUsd(t.price) + '</div>' +
+      extHtml +
       '<div class="stat-sub">' + fmtPct(t.chgPct) + (wk52 ? " · " + wk52 : "") + '</div>';
     var subEl = card.querySelector(".stat-sub");
     setSubClass(subEl, t.chgPct || 0);

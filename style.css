@@ -328,6 +328,14 @@ html, body {
 }
 .stat-card .stat-sub.positive { color: var(--positive); }
 .stat-card .stat-sub.negative { color: var(--negative); }
+.stat-subline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 1px;
+}
+.stat-subline.positive { color: var(--positive); }
+.stat-subline.negative { color: var(--negative); }
 
 .chart-panel {
   background: var(--surface);
