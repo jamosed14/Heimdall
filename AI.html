@@ -73,6 +73,46 @@
   <div class="section-sub">Single-name CDS conventional spread, sorted highest stress first — where the bond market is least comfortable financing the AI buildout, and where it isn't.</div>
   <div class="stat-grid" id="group-credit"></div>
 
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header" style="margin-bottom:4px;">
+      <div><div class="panel-title">CDS History</div><div class="panel-sub" id="cdsHistorySub">Basis points, daily</div></div>
+      <button class="scale-toggle" id="cdsHistoryCsvBtn">EXPORT CSV</button>
+    </div>
+    <div class="chart-wrap compact"><canvas id="cdsHistoryChart"></canvas></div>
+    <div class="mini-legend" id="cdsLegend"></div>
+  </div>
+
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header" style="margin-bottom:4px;">
+      <div><div class="panel-title">Relative Repricing <span class="calc-badge">calc</span></div><div class="panel-sub">Each name indexed to 100 at its first tracked observation — shows widening/tightening intensity independent of starting spread level</div></div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="cdsIndexedChart"></canvas></div>
+  </div>
+
+  <div class="range-toggle" id="cdsRangeToggle" style="margin-top:-8px; margin-bottom:20px;">
+    <button data-range="3M">3M</button>
+    <button data-range="6M">6M</button>
+    <button data-range="1Y">1Y</button>
+    <button data-range="MAX" class="active">MAX</button>
+  </div>
+
+  <div class="breakdown-table-wrap">
+    <table class="breakdown-table" id="cdsChangeTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Level</th>
+          <th>1W</th>
+          <th>1M</th>
+          <th>3M</th>
+          <th>YTD</th>
+        </tr>
+      </thead>
+      <tbody id="cdsChangeBody"></tbody>
+    </table>
+  </div>
+  <div class="calc-note">Change columns fill in as daily history accumulates. ICE's settlement API exposes only each day's current print, so there's no historical backfill — tracking began 2026-08-20, and 1W/1M/3M/YTD read "—" until enough calendar time has actually passed for each window.</div>
+
   <div class="section-heading">Compute</div>
   <div class="section-sub">Broad NAICS-3344 industry data — not AI-chip-specific.</div>
   <div class="stat-grid" id="group-compute"></div>

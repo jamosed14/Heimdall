@@ -131,7 +131,10 @@ foreach ($name in $NAME_MAP.Keys) {
     $seriesResult = Get-ValidatedMergedSeries -Fresh $freshSeries -Existing $existingSeries -MinCount 1 -Name $ticker
     $sourceStatus[$ticker] = $seriesResult.status
 
-    $series = $seriesResult.series | ForEach-Object { @{ d = $_.Date; v = [math]::Round($_.Value, 2) } }
+    # @(...) forces array typing even when there's exactly one point - PowerShell otherwise
+    # unwraps a single-item pipeline result to a bare scalar/hashtable, which would then
+    # serialize as {d,v} instead of [{d,v}] and break every front-end consumer expecting an array.
+    $series = @($seriesResult.series | ForEach-Object { @{ d = $_.Date; v = [math]::Round($_.Value, 2) } })
     $tickersOut[$ticker] = @{
         name          = $rec.name
         maturityDate  = $maturityDate

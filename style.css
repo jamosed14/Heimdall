@@ -280,6 +280,27 @@ html, body {
 .chg-chip.positive { color: var(--positive); }
 .chg-chip.negative { color: var(--negative); }
 
+.mini-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 10px 2px 0;
+}
+.mini-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.mini-legend .legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .stat-card {
   background: var(--surface);
   border: 1px solid var(--border);

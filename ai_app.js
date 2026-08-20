@@ -122,6 +122,140 @@
     });
   }
 
+  // NVDA isn't in COMPANY_COLORS (that map is capex-chart-specific and only covers the five
+  // capex-reporting companies) - CDS charts cover all six hyperscalers, so extend it here rather
+  // than touch the capex map's meaning.
+  var CDS_COLORS = Object.assign({}, COMPANY_COLORS, { NVDA: "#ab7d45" });
+  var CDS_CHART_RANGES = { "3M": 91, "6M": 182, "1Y": 365, "MAX": null };
+
+  function cdsOrder(CDS) {
+    return Object.keys(CDS.tickers).sort(function (a, b) {
+      return CDS.tickers[b].spreadBp - CDS.tickers[a].spreadBp;
+    });
+  }
+
+  function buildCdsLegend(elId, order) {
+    var el = document.getElementById(elId);
+    if (!el) return;
+    el.innerHTML = order.map(function (ticker) {
+      return '<span class="legend-item"><span class="legend-dot" style="background:' + (CDS_COLORS[ticker] || "#9c8f76") + '"></span>' + ticker + "</span>";
+    }).join("");
+  }
+
+  function buildCdsHistoryCharts() {
+    var CDS = window.CDS_DATA;
+    if (!CDS || !CDS.tickers) return;
+    var order = cdsOrder(CDS);
+
+    var earliestDate = null;
+    order.forEach(function (ticker) {
+      (CDS.tickers[ticker].series || []).forEach(function (p) {
+        if (!earliestDate || p.d < earliestDate) earliestDate = p.d;
+      });
+    });
+    var sub = document.getElementById("cdsHistorySub");
+    if (sub) {
+      sub.textContent = earliestDate
+        ? "Basis points, daily · tracking since " + earliestDate + " (no historical backfill available)"
+        : "Basis points, daily";
+    }
+
+    window.HeimdallCharts.create({
+      canvasId: "cdsHistoryChart", rangeToggleId: "cdsRangeToggle", csvButtonId: "cdsHistoryCsvBtn",
+      csvFilename: "hyperscaler_cds_history", defaultRange: "MAX", ranges: CDS_CHART_RANGES,
+      series: order.map(function (ticker) {
+        return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: CDS.tickers[ticker].series || [] };
+      }),
+      yFormatter: function (v) { return Math.round(v) + "bp"; }
+    });
+    buildCdsLegend("cdsLegend", order);
+
+    // Indexed-to-100: each name normalized to its own first tracked observation, so repricing
+    // intensity is comparable across names regardless of starting spread level (e.g. MSFT at
+    // 46bp widening 20% should read the same visual intensity as ORCL at 212bp widening 20%).
+    window.HeimdallCharts.create({
+      canvasId: "cdsIndexedChart", rangeToggleId: "cdsRangeToggle", defaultRange: "MAX", ranges: CDS_CHART_RANGES,
+      series: order.map(function (ticker) {
+        var rows = (CDS.tickers[ticker].series || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+        var base = rows.length ? rows[0].v : null;
+        var idxRows = (!base || base <= 0) ? [] : rows.map(function (p) { return { d: p.d, v: (p.v / base) * 100 }; });
+        return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: idxRows };
+      }),
+      yFormatter: function (v) { return v.toFixed(0); }
+    });
+  }
+
+  // Basis-point change from the latest observation to the nearest prior observation at least
+  // `days` back. Returns null (not zero) when history doesn't reach back that far yet - a
+  // missing window is not a flat window.
+  function bpChangeAt(seriesAsc, days) {
+    if (!seriesAsc || seriesAsc.length < 2) return null;
+    var latest = seriesAsc[seriesAsc.length - 1];
+    var targetMs = Date.parse(latest.d + "T00:00:00Z") - days * 86400000;
+    for (var i = seriesAsc.length - 1; i >= 0; i--) {
+      var ms = Date.parse(seriesAsc[i].d + "T00:00:00Z");
+      if (ms <= targetMs) return latest.v - seriesAsc[i].v;
+    }
+    return null;
+  }
+
+  function ytdChangeBp(seriesAsc) {
+    if (!seriesAsc || seriesAsc.length < 2) return null;
+    var latest = seriesAsc[seriesAsc.length - 1];
+    var jan1 = latest.d.slice(0, 4) + "-01-01";
+    // Tracked history has to actually reach back to Jan 1 this year - otherwise there's no
+    // real YTD baseline, only a partial-year one that would misleadingly look like a full YTD.
+    if (seriesAsc[0].d > jan1) return null;
+    for (var i = 0; i < seriesAsc.length; i++) {
+      if (seriesAsc[i].d >= jan1) return latest.v - seriesAsc[i].v;
+    }
+    return null;
+  }
+
+  function cdsChangeCellStyle(bp) {
+    if (bp === null || bp === undefined) return "";
+    var mag = Math.min(Math.abs(bp) / 100, 1); // saturates at a 100bp move
+    var alpha = (0.08 + mag * 0.30).toFixed(3);
+    var rgb = bp > 0 ? "192,87,74" : "127,174,85"; // widening = red, tightening = green
+    return ' style="background:rgba(' + rgb + "," + alpha + ')"';
+  }
+
+  function buildCdsChangeTable() {
+    var CDS = window.CDS_DATA;
+    var tbody = document.getElementById("cdsChangeBody");
+    if (!tbody) return;
+    if (!CDS || !CDS.tickers) {
+      tbody.innerHTML = '<tr><td colspan="6">no cached data — run fetch_cds_data.ps1</td></tr>';
+      return;
+    }
+
+    function fmtChg(bp) {
+      if (bp === null || bp === undefined) return "—";
+      return (bp > 0 ? "+" : "") + bp.toFixed(1) + "bp";
+    }
+    function chgClass(bp) {
+      if (bp === null || bp === undefined) return "";
+      return bp > 0 ? "negative" : bp < 0 ? "positive" : "";
+    }
+
+    tbody.innerHTML = cdsOrder(CDS).map(function (ticker) {
+      var t = CDS.tickers[ticker];
+      var seriesAsc = (t.series || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+      var w1 = bpChangeAt(seriesAsc, 7);
+      var m1 = bpChangeAt(seriesAsc, 30);
+      var m3 = bpChangeAt(seriesAsc, 91);
+      var ytd = ytdChangeBp(seriesAsc);
+      return "<tr>" +
+        "<td>" + ticker + "</td>" +
+        "<td>" + t.spreadBp.toFixed(1) + "bp</td>" +
+        '<td class="' + chgClass(w1) + '"' + cdsChangeCellStyle(w1) + ">" + fmtChg(w1) + "</td>" +
+        '<td class="' + chgClass(m1) + '"' + cdsChangeCellStyle(m1) + ">" + fmtChg(m1) + "</td>" +
+        '<td class="' + chgClass(m3) + '"' + cdsChangeCellStyle(m3) + ">" + fmtChg(m3) + "</td>" +
+        '<td class="' + chgClass(ytd) + '"' + cdsChangeCellStyle(ytd) + ">" + fmtChg(ytd) + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
   function renderCompanyBreakdown() {
     var tbody = document.getElementById("companyBreakdownBody");
     var cap = DATA.capital;
@@ -300,6 +434,8 @@
   // CDS_DATA is a separate cache from AI_DATA (different fetch script, different cadence) -
   // rendered independently so one being unavailable never blocks the other.
   renderCredit();
+  buildCdsHistoryCharts();
+  buildCdsChangeTable();
 
   if (!DATA) {
     document.getElementById("asOfNote").textContent = "no cached data — run fetch_ai_data.ps1";
