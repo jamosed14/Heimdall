@@ -98,6 +98,50 @@ function Round-Stat($stat, $digits, $freq) {
     return $r
 }
 
+# Energy's physical series (product stocks, refinery utilization, crack spreads) are genuinely
+# seasonal - a gasoline stock draw in June is normal, the same draw in December isn't. A raw
+# week-ago/month-ago delta can't tell those apart, so this compares the latest print to the
+# average of the SAME calendar week across the trailing 5 years (+-10 day match window per prior
+# year) instead - the same convention EIA's own weekly petroleum status report uses (5-year range
+# bands), already proven here for natural gas storage before this was generalized to everything
+# else that's seasonal on this tab.
+function Get-SeasonalAvg($series) {
+    $n = $series.Count
+    if ($n -eq 0) { return @{ avg = $null; diff = $null; pct = $null; latestValue = $null; latestDate = $null; yearsUsed = 0 } }
+    $latest = $series[$n - 1]
+    $latestDate = [DateTime]::Parse($latest.Date)
+    $vals = New-Object System.Collections.Generic.List[double]
+    for ($yr = 1; $yr -le 5; $yr++) {
+        $targetDate = $latestDate.AddYears(-$yr)
+        $best = $null
+        $bestDiff = [double]::MaxValue
+        foreach ($p in $series) {
+            $d = [DateTime]::Parse($p.Date)
+            $diff = [math]::Abs(($d - $targetDate).TotalDays)
+            if ($diff -lt $bestDiff -and $diff -le 10) { $bestDiff = $diff; $best = $p.Value }
+        }
+        if ($null -ne $best) { $vals.Add($best) }
+    }
+    if ($vals.Count -eq 0) { return @{ avg = $null; diff = $null; pct = $null; latestValue = $latest.Value; latestDate = $latest.Date; yearsUsed = 0 } }
+    $sum = 0.0
+    foreach ($v in $vals) { $sum += $v }
+    $avg = $sum / $vals.Count
+    $diff = $latest.Value - $avg
+    $pct = if ($avg -ne 0) { ($diff / $avg) * 100.0 } else { $null }
+    return @{ avg = $avg; diff = $diff; pct = $pct; latestValue = $latest.Value; latestDate = $latest.Date; yearsUsed = $vals.Count }
+}
+
+function Round-Seasonal($s, $digits) {
+    if ($null -eq $s -or $null -eq $s.avg) { return @{ avg = $null; diff = $null; pct = $null; asOfDate = $(if ($s) { $s.latestDate } else { $null }); yearsUsed = 0 } }
+    return @{
+        avg      = [math]::Round($s.avg, $digits)
+        diff     = [math]::Round($s.diff, $digits)
+        pct      = if ($null -ne $s.pct) { [math]::Round($s.pct, 1) } else { $null }
+        asOfDate = $s.latestDate
+        yearsUsed = $s.yearsUsed
+    }
+}
+
 function To-SeriesJson($series, $digits) {
     return , $(foreach ($p in $series) { @{ d = $p.Date; v = [math]::Round($p.Value, $digits) } })
 }
@@ -163,34 +207,20 @@ $crack321 = $crack321.ToArray()
 $crackGasoline = $crackGasoline.ToArray()
 $crackDistillate = $crackDistillate.ToArray()
 
-# --- Natural gas storage vs 5-year seasonal average (same month/day window, prior 5 years) ---
-$storageArr = $raw["GASSTOR"]
-$latestStorage = $storageArr[$storageArr.Count - 1]
-$latestDate = [DateTime]::Parse($latestStorage.Date)
-$fiveYearVals = New-Object System.Collections.Generic.List[double]
-for ($yr = 1; $yr -le 5; $yr++) {
-    $targetDate = $latestDate.AddYears(-$yr)
-    $best = $null
-    $bestDiff = [double]::MaxValue
-    foreach ($p in $storageArr) {
-        $d = [DateTime]::Parse($p.Date)
-        $diff = [math]::Abs(($d - $targetDate).TotalDays)
-        if ($diff -lt $bestDiff -and $diff -le 10) { $bestDiff = $diff; $best = $p.Value }
-    }
-    if ($null -ne $best) { $fiveYearVals.Add($best) }
-}
-$storage5yAvg = $null
-if ($fiveYearVals.Count -gt 0) {
-    $sum = 0.0
-    foreach ($v in $fiveYearVals) { $sum += $v }
-    $storage5yAvg = $sum / $fiveYearVals.Count
-}
-$storageVs5y = $null
-$storageVs5yPct = $null
-if ($null -ne $storage5yAvg) {
-    $storageVs5y = $latestStorage.Value - $storage5yAvg
-    $storageVs5yPct = ($storageVs5y / $storage5yAvg) * 100.0
-}
+# --- Seasonal (vs same-week 5Y avg) comparisons for every genuinely seasonal series on this
+# tab: natural gas storage (kept for backward compat with the existing card), the four weekly
+# petroleum stock series, refinery utilization, and all three crack spreads. Crude production
+# deliberately excluded - it's driven by drilling/capex cycles and well decline curves, not
+# season, so a seasonal comparison there would be noise, not signal.
+$storageVs5y = Round-Seasonal (Get-SeasonalAvg $raw["GASSTOR"]) 0
+$crudeStocksVs5y = Round-Seasonal (Get-SeasonalAvg $raw["CRUDESTK"]) 0
+$cushingStocksVs5y = Round-Seasonal (Get-SeasonalAvg $raw["CUSHINGSTK"]) 0
+$gasolineStocksVs5y = Round-Seasonal (Get-SeasonalAvg $raw["GASSTK"]) 0
+$distillateStocksVs5y = Round-Seasonal (Get-SeasonalAvg $raw["DISTSTK"]) 0
+$refineryUtilizationVs5y = Round-Seasonal (Get-SeasonalAvg $raw["UTIL"]) 1
+$crack321Vs5y = Round-Seasonal (Get-SeasonalAvg $crack321) 2
+$crackGasolineVs5y = Round-Seasonal (Get-SeasonalAvg $crackGasoline) 2
+$crackDistillateVs5y = Round-Seasonal (Get-SeasonalAvg $crackDistillate) 2
 
 # --- Assemble payload ---
 $prices = @{
@@ -202,27 +232,29 @@ $prices = @{
 }
 $cracks = @{
     crack321 = Round-Stat (Get-Changes $crack321) 2 "daily"
+    crack321Vs5y = $crack321Vs5y
     crackGasoline = Round-Stat (Get-Changes $crackGasoline) 2 "daily"
+    crackGasolineVs5y = $crackGasolineVs5y
     crackDistillate = Round-Stat (Get-Changes $crackDistillate) 2 "daily"
+    crackDistillateVs5y = $crackDistillateVs5y
 }
 $inventories = @{
     crudeStocks   = Round-Stat (Get-Changes $raw["CRUDESTK"]) 0 "weekly"
+    crudeStocksVs5y = $crudeStocksVs5y
     cushingStocks = Round-Stat (Get-Changes $raw["CUSHINGSTK"]) 0 "weekly"
+    cushingStocksVs5y = $cushingStocksVs5y
     gasolineStocks = Round-Stat (Get-Changes $raw["GASSTK"]) 0 "weekly"
+    gasolineStocksVs5y = $gasolineStocksVs5y
     distillateStocks = Round-Stat (Get-Changes $raw["DISTSTK"]) 0 "weekly"
+    distillateStocksVs5y = $distillateStocksVs5y
     refineryUtilization = Round-Stat (Get-Changes $raw["UTIL"]) 1 "weekly"
+    refineryUtilizationVs5y = $refineryUtilizationVs5y
     crudeProduction = Round-Stat (Get-Changes $raw["CRUDEPROD"]) 0 "monthly"
 }
 $naturalGas = @{
     henryHub = $prices.henryHub
     workingGasStorage = Round-Stat (Get-Changes $raw["GASSTOR"]) 0 "weekly"
-    storageVs5yAvg = @{
-        value = if ($null -ne $storageVs5y) { [math]::Round($storageVs5y, 0) } else { $null }
-        pct   = if ($null -ne $storageVs5yPct) { [math]::Round($storageVs5yPct, 1) } else { $null }
-        avg   = if ($null -ne $storage5yAvg) { [math]::Round($storage5yAvg, 0) } else { $null }
-        asOfDate = $latestStorage.Date
-        freq = "weekly"
-    }
+    storageVs5yAvg = $storageVs5y
 }
 $series = @{
     wti = To-SeriesJson $raw["WTI"] 2
@@ -259,4 +291,4 @@ $payload = @{
 
 Write-DataFileAtomic -Path $outPath -VarName "ENERGY_DATA" -Payload $payload -Depth 8
 Write-Output ("Crack 3:2:1 = {0}  Gasoline crack = {1}  Distillate crack = {2}" -f $cracks.crack321.value, $cracks.crackGasoline.value, $cracks.crackDistillate.value)
-Write-Output ("Storage vs 5Y avg: {0} Bcf ({1}%)" -f $naturalGas.storageVs5yAvg.value, $naturalGas.storageVs5yAvg.pct)
+Write-Output ("Storage vs 5Y avg: {0} Bcf ({1}%)" -f $naturalGas.storageVs5yAvg.diff, $naturalGas.storageVs5yAvg.pct)
