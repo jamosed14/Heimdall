@@ -141,6 +141,33 @@ if ($raw["DXY"].Count -gt 0) {
     Write-Output ("  DXY: NO DATA available [{0}]" -f $dxyResult.status)
 }
 
+# FRED's H.10 "noon buying rate" series (DEXUSEU/DEXJPUS/DEXUSUK/DEXCHUS) are genuinely a week
+# or more behind at the source - confirmed live against FRED directly, not a polling problem on
+# our end. They're still the best source for deep back-history (2003+), so kept for the chart
+# series below, but the live card VALUE now comes from Yahoo instead - same fix already applied
+# to DXY above, for the same reason (a Fed release series isn't timely enough for a "current"
+# quote). Yahoo's *=X tickers use the same base/quote convention as the FRED series they
+# replace here (confirmed live: JPY=X and CNY=X are both quoted as USD per unit, matching
+# DEXJPUS/DEXCHUS; EURUSD=X and GBPUSD=X are quoted as USD per EUR/GBP, matching DEXUSEU/DEXUSUK).
+Write-Output "Fetching Yahoo FX pairs (live card values)..."
+$YAHOO_FX = [ordered]@{
+    EURUSD_YHOO = "EURUSD=X"
+    USDJPY_YHOO = "JPY=X"
+    GBPUSD_YHOO = "GBPUSD=X"
+    USDCNY_YHOO = "CNY=X"
+}
+foreach ($k in $YAHOO_FX.Keys) {
+    $fresh = Get-YahooDaily $YAHOO_FX[$k]
+    $result = Get-ValidatedMergedSeries -Fresh $fresh -Existing (Get-ExistingRaw $k) -MinCount 500 -Name $k
+    $raw[$k] = $result.series
+    $sourceStatus[$k] = $result.status
+    if ($raw[$k].Count -gt 0) {
+        Write-Output ("  {0}: {1} points, latest {2} = {3} [{4}]" -f $k, $raw[$k].Count, $raw[$k][-1].Date, $raw[$k][-1].Value, $result.status)
+    } else {
+        Write-Output ("  {0}: NO DATA available [{1}]" -f $k, $result.status)
+    }
+}
+
 # A handful of central series that most of the page's stat blocks derive from - if these are
 # completely unusable (fresh invalid AND no cache), computing changes/spreads against them
 # would cascade nulls through most of the payload. Abort and preserve the whole existing file
@@ -429,10 +456,12 @@ $fedExpectations = @{
 
 $fx = @{
     dxy    = Round-Stat (Get-Changes $raw["DXY"]) 2 "daily"
-    eurusd = Round-Stat (Get-Changes $raw["DEXUSEU"]) 4 "daily"
-    usdjpy = Round-Stat (Get-Changes $raw["DEXJPUS"]) 2 "daily"
-    gbpusd = Round-Stat (Get-Changes $raw["DEXUSUK"]) 4 "daily"
-    usdcny = Round-Stat (Get-Changes $raw["DEXCHUS"]) 4 "daily"
+    # Card values from Yahoo (see fetch note above) - genuinely current, unlike FRED's H.10
+    # series which run a week or more behind at the source.
+    eurusd = Round-Stat (Get-Changes $raw["EURUSD_YHOO"]) 4 "daily"
+    usdjpy = Round-Stat (Get-Changes $raw["USDJPY_YHOO"]) 2 "daily"
+    gbpusd = Round-Stat (Get-Changes $raw["GBPUSD_YHOO"]) 4 "daily"
+    usdcny = Round-Stat (Get-Changes $raw["USDCNY_YHOO"]) 4 "daily"
 }
 
 # ===================== Chartable history series =====================
@@ -504,6 +533,7 @@ $yieldCurve = @{
 $rawSeriesJson = @{}
 foreach ($id in $fredIds) { $rawSeriesJson[$id] = To-SeriesJson $raw[$id] 4 }
 $rawSeriesJson["DXY"] = To-SeriesJson $raw["DXY"] 4
+foreach ($k in $YAHOO_FX.Keys) { $rawSeriesJson[$k] = To-SeriesJson $raw[$k] 4 }
 
 $nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 # FEDTARMD's "dates" are FOMC projection TARGET YEARS (e.g. 2028), not observation dates - years
