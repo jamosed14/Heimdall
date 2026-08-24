@@ -107,7 +107,12 @@
     var premiumChg = btcStats.premiumPct;
     var premiumLabel = premiumChg === null || premiumChg === undefined ? "—" :
       fmtPct(premiumChg) + (premiumChg >= 0 ? " premium" : " discount");
-    html += row("200W MA premium/discount", premiumLabel, null, premiumChg || 0, btcObsInfo);
+    // id'd separately from the row() helper's usual output so updateLivePremium() below can
+    // recompute this in place once the live ticker price is available - otherwise this row
+    // would stay frozen at last night's cached close while the price right above it (via
+    // .btc-live-mirror) keeps moving live, which is exactly the BTC-tab-vs-Summary mismatch
+    // this was built to fix (BTC tab already recomputes its premium live in app.js).
+    html += row("200W MA premium/discount", '<span id="sumBtcPremium">' + premiumLabel + "</span>", null, premiumChg || 0, btcObsInfo);
     html += row("30D realized vol", btcStats.vol30dPct === null || btcStats.vol30dPct === undefined ? "—" : btcStats.vol30dPct.toFixed(1) + "%", null, 0, btcObsInfo);
     html += '<div class="summary-block-foot">daily close ' + (BTC ? BTC.asOfDate : "—") + " · live ticker on BTC tab</div>";
     html += "</div>";
@@ -186,7 +191,38 @@
     document.getElementById("summaryGrid").innerHTML = html;
   }
 
+  // ---------- Live-recomputed 200W MA premium/discount ----------
+  // Mirrors BTC.html's app.js updateLiveDerivedStats: the BTC price row updates live via
+  // ticker.js's .btc-live-mirror, but without this the premium/discount row sitting right next
+  // to it would stay frozen at last night's cached close - the exact mismatch between this page
+  // and the BTC tab that prompted this fix (BTC tab already recomputes its premium live).
+  function parseLivePrice(text) {
+    if (!text) return null;
+    var n = parseFloat(text.replace(/[^0-9.\-]/g, ""));
+    return (isFinite(n) && n > 0) ? n : null;
+  }
+
+  function updateLivePremium() {
+    var premiumEl = document.getElementById("sumBtcPremium");
+    if (!premiumEl) return; // grid not built yet, or this row absent (no BTC data)
+    var ma200w = BTC && BTC.stats ? BTC.stats.ma200w : null;
+    if (!ma200w) return;
+    var livePrice = parseLivePrice(document.getElementById("liveBtcPrice") ? document.getElementById("liveBtcPrice").textContent : null);
+    // No valid live price yet (still connecting, or ticker fetch failing) - fail stale: leave
+    // whatever's already on screen (the cached-close value from buildBlocks) untouched.
+    if (livePrice === null) return;
+    var pct = ((livePrice - ma200w) / ma200w) * 100;
+    premiumEl.textContent = fmtPct(pct) + (pct >= 0 ? " premium" : " discount");
+  }
+
+  var liveBtcMount = document.getElementById("liveBtcMount");
+  if (liveBtcMount && window.MutationObserver) {
+    new MutationObserver(updateLivePremium)
+      .observe(liveBtcMount, { childList: true, subtree: true, characterData: true });
+  }
+
   buildBlocks();
+  updateLivePremium();
   document.getElementById("generatedNote").textContent =
     "BTC cache: " + (BTC ? BTC.generatedAtUtc : "—") + " · Macro cache: " + (MACRO ? MACRO.generatedAtUtc : "—");
   // Live ticker is handled by the shared ticker.js, included after this script.
