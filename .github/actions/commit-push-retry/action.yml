@@ -1,8 +1,8 @@
 name: "Commit and push data changes with retry"
 description: >
   Commits any changed data/*.js files and pushes to main, retrying after a pull --rebase if the
-  push is rejected. Shared by all four refresh cadence workflows (BTC Fast, Market Fast, Equities
-  Fast, Slow) so this logic exists once, not four times. Each workflow now has its own
+  push is rejected. Shared by all five refresh cadence workflows (BTC Fast, Market Fast, Equities
+  Fast, Slow, CDS) so this logic exists once, not five times. Each workflow has its own
   `concurrency` group (split 2026-08-20 - a shared group across all of them was tried first and
   rejected once it was confirmed to be silently dropping scheduled runs: GitHub Actions
   concurrency groups only hold one pending run at a time, so multiple workflows queuing into one

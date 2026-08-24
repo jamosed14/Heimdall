@@ -1,0 +1,48 @@
+name: CDS refresh (ICE Clear Credit settlement prices - once daily, evening ET)
+
+# Split out from Slow refresh on 2026-08-24 after the AI tab's CDS History chart stopped
+# accumulating new points past 2026-08-21. Root cause: ICE Clear Credit's public settlement-price
+# API (https://www.ice.com/api/cds-settlement-prices/icc-single-names) publishes per-name on a
+# rolling basis through the day, not as one atomic daily snapshot - confirmed live by checking
+# which names had already rolled to the new day's clearingDate at a given moment: APAC/Australian
+# names (Alibaba, ANZ, Bank of China, Commonwealth of Australia) roll over first, while our six
+# US hyperscaler names were still showing the PRIOR day's print even at 10:30am ET. Slow refresh's
+# 06:00 UTC (2am ET) run was always too early in the US settlement cycle to ever catch a same-day
+# print for these names - it was fetching before the US trading day had even opened.
+#
+# 22:00 UTC = 6pm ET (EDT) / 5pm EST - comfortably after the US close (4pm ET) and a plausible
+# window for US-name settlement submissions to have been collected and published. This is a
+# best-effort timing guess based on the one data point above, not a documented ICE publish
+# schedule (none is published for this free endpoint) - if points are still missing after this
+# change, the fetch may need to move later still.
+#
+# No DST-aware gating needed (unlike the two hourly workflows): a once-daily job just needs to
+# land sometime in the right general window, not wall-clock ET precision to the minute. Fixed
+# 22:00 UTC drifts between 6pm EDT and 5pm EST across the year, both still solidly after the US
+# close either way.
+
+on:
+  schedule:
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}
+
+# Own concurrency group - see commit-push-retry's doc comment and refresh-btc-fast.yml's comment
+# for why a shared group across refresh workflows was rejected.
+concurrency:
+  group: heimdall-cds
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run fetch_cds_data.ps1
+        shell: pwsh
+        run: ./fetch_cds_data.ps1
+
+      - uses: ./.github/actions/commit-push-retry
