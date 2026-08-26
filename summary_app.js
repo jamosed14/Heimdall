@@ -2,6 +2,7 @@
   var BTC = window.BTC_DATA;
   var MACRO = window.MACRO_DATA;
   var ENERGY = window.ENERGY_DATA;
+  var EQUITIES = window.EQUITIES_DATA;
 
   function fmtPct(v, digits) {
     if (v === null || v === undefined) return "—";
@@ -186,6 +187,27 @@
       html += row("Crude stocks", cs.value.toLocaleString("en-US") + " kbbl", csChg === null ? null : (csChg > 0 ? "+" : "") + Math.round(csChg).toLocaleString("en-US") + " WoW", csChg || 0, csObsInfo);
     }
     html += '<div class="summary-block-foot">EIA daily spot prices · crack spread is our calculated proxy · stocks weekly</div>';
+    html += "</div>";
+
+    // ---- Equities ----
+    var eqTickers = (EQUITIES && EQUITIES.tickers) || {};
+    function equityRow(label, sym) {
+      var t = eqTickers[sym];
+      if (!t || t.price === null || t.price === undefined) return row(label, "—", null, 0);
+      var obsInfo = { obsDate: t.asOfDate, freq: "daily", generatedAtUtc: EQUITIES.generatedAtUtc };
+      var chg = t.chgPct;
+      return row(label, fmtUsd(t.price), chg === null || chg === undefined ? null : fmtPct(chg) + " 1D", chg || 0, obsInfo);
+    }
+    html += '<div class="summary-block">' + blockHeader("Equities", "Equities.html");
+    // MSTR (bitcoin balance-sheet proxy) ties back to the Bitcoin block above; NVDA and ORCL
+    // are the two ends of the AI hyperscaler credit-stress story on the AI Buildout tab (ORCL
+    // is the one under real CDS spread widening, NVDA the largest/most-watched name) - not an
+    // arbitrary pick, meant to connect to what's already elsewhere on the dashboard rather than
+    // duplicate the full 8-ticker watchlist here.
+    html += equityRow("MSTR (Strategy)", "MSTR");
+    html += equityRow("NVDA", "NVDA");
+    html += equityRow("ORCL", "ORCL");
+    html += '<div class="summary-block-foot">Yahoo Finance quotes, 15-min pre/regular/after-hours weekdays · informational only, not a licensed feed</div>';
     html += "</div>";
 
     document.getElementById("summaryGrid").innerHTML = html;
