@@ -4,7 +4,11 @@
 # data\equities_data.js.
 #
 # Two groups on the Equities tab:
-#   - Bitcoin proxies: MSTR (Strategy), STRC (Strategy's variable-rate preferred)
+#   - Bitcoin proxies: MSTR (Strategy common) + Strategy's full preferred stack - STRK (8.00%
+#     Series A Perpetual Strike), STRF (10.00% Series A Perpetual Strife), STRD (10.00% Series A
+#     Perpetual Stride), STRC (variable-rate monthly, added 2026-08-20; the other three added
+#     2026-08-25). Confirmed all four are real distinct listings via Yahoo before adding -
+#     tickers this close in name/structure are exactly the kind of thing not to guess at.
 #   - AI hyperscalers: NVDA, MSFT, GOOGL, AMZN, META, ORCL (same five+one already tracked for
 #     capex/revenue on the AI tab via SEC EDGAR - this adds their actual stock price alongside
 #     those fundamentals)
@@ -45,6 +49,9 @@ function Get-ExistingSeries($ticker) {
 
 $WATCHLIST = @(
     @{ Ticker = "MSTR";  Group = "btc-proxy" },
+    @{ Ticker = "STRK";  Group = "btc-proxy" },
+    @{ Ticker = "STRF";  Group = "btc-proxy" },
+    @{ Ticker = "STRD";  Group = "btc-proxy" },
     @{ Ticker = "STRC";  Group = "btc-proxy" },
     @{ Ticker = "NVDA";  Group = "hyperscaler" },
     @{ Ticker = "MSFT";  Group = "hyperscaler" },
@@ -84,7 +91,8 @@ foreach ($w in $WATCHLIST) {
     }
 
     $existingSeries = Get-ExistingSeries $sym
-    # STRC only listed in 2025 - a short real history is expected, not a truncation. 30 is a
+    # Strategy's preferreds are all recent listings (STRC/STRK/STRF/STRD, 2024-2025) - a short
+    # real history is expected, not a truncation. 30 is a
     # conservative floor that still catches a genuinely broken/empty response.
     $seriesResult = Get-ValidatedMergedSeries -Fresh $freshSeries -Existing $existingSeries -MinCount 30 -Name $sym
     $sourceStatus[$sym] = $seriesResult.status

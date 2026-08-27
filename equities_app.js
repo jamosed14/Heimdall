@@ -18,7 +18,7 @@
     else if (value < 0) el.classList.add("negative");
   }
 
-  var TICKERS_ORDER = ["MSTR", "STRC", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "ORCL"];
+  var TICKERS_ORDER = ["MSTR", "STRK", "STRF", "STRD", "STRC", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "ORCL"];
 
   function renderCard(sym) {
     var t = DATA.tickers[sym];

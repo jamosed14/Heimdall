@@ -199,12 +199,15 @@
       return row(label, fmtUsd(t.price), chg === null || chg === undefined ? null : fmtPct(chg) + " 1D", chg || 0, obsInfo);
     }
     html += '<div class="summary-block">' + blockHeader("Equities", "Equities.html");
-    // MSTR (bitcoin balance-sheet proxy) ties back to the Bitcoin block above; NVDA and ORCL
-    // are the two ends of the AI hyperscaler credit-stress story on the AI Buildout tab (ORCL
-    // is the one under real CDS spread widening, NVDA the largest/most-watched name) - not an
-    // arbitrary pick, meant to connect to what's already elsewhere on the dashboard rather than
-    // duplicate the full 8-ticker watchlist here.
+    // MSTR (bitcoin balance-sheet proxy, common) + STRC (its variable-rate preferred - picked
+    // as the one representative out of Strategy's full four-preferred stack on the Equities
+    // tab, not all of them here) tie back to the Bitcoin block above; NVDA and ORCL are the two
+    // ends of the AI hyperscaler credit-stress story on the AI Buildout tab (ORCL is the one
+    // under real CDS spread widening, NVDA the largest/most-watched name) - not an arbitrary
+    // pick, meant to connect to what's already elsewhere on the dashboard rather than duplicate
+    // the full 11-ticker watchlist here.
     html += equityRow("MSTR (Strategy)", "MSTR");
+    html += equityRow("STRC (Strategy pref)", "STRC");
     html += equityRow("NVDA", "NVDA");
     html += equityRow("ORCL", "ORCL");
     html += '<div class="summary-block-foot">Yahoo Finance quotes, 15-min pre/regular/after-hours weekdays · informational only, not a licensed feed</div>';
