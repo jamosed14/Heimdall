@@ -256,6 +256,45 @@
     }).join("");
   }
 
+  // ---------- RECENT EARNINGS (all six - five capex-tracked hyperscalers + NVDA) ----------
+  function fmtShortDate(d) {
+    if (!d) return null;
+    var dt = new Date(d + "T00:00:00Z");
+    return dt.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  }
+
+  function renderEarnings() {
+    var el = document.getElementById("group-earnings");
+    if (!el) return; // section not present on this page build
+    var earn = DATA.earnings;
+    if (!earn || !earn.companies) {
+      el.innerHTML = '<div class="stat-card"><div class="stat-label">Recent Earnings</div><div class="stat-value">—</div><div class="stat-sub">no cached data — run fetch_ai_data.ps1</div></div>';
+      return;
+    }
+    var tickers = Object.keys(earn.companies);
+    // Most-recently-filed first, so a same-day release (e.g. NVDA's) surfaces at the top
+    // instead of being buried in whatever order the fetch happened to resolve companies.
+    tickers.sort(function (a, b) {
+      var da = earn.companies[a].filedDate || "";
+      var db = earn.companies[b].filedDate || "";
+      return da < db ? 1 : da > db ? -1 : 0;
+    });
+    tickers.forEach(function (ticker) {
+      var c = earn.companies[ticker];
+      if (!c || c.revenue === null || c.revenue === undefined) {
+        statCard(el, ticker, "—", "data unavailable");
+        return;
+      }
+      var filedLabel = fmtShortDate(c.filedDate);
+      var sub = fmtUsd(c.netIncome) + " net income" +
+        (c.netMarginPct !== null && c.netMarginPct !== undefined ? " (" + c.netMarginPct.toFixed(1) + "% margin)" : "") +
+        (c.revenueYoYPct !== null && c.revenueYoYPct !== undefined ? " · " + fmtPct(c.revenueYoYPct) + " rev YoY" : "");
+      statCard(el, ticker + (filedLabel ? " · filed " + filedLabel : ""),
+        fmtUsd(c.revenue), sub, c.netIncomeYoYPct, c.periodEnd, "quarterly",
+        ticker === tickers[0] ? "Net margin is Heimdall-calculated (net income ÷ revenue), not a reported GAAP figure. Sorted by SEC filing date, most recent first." : null);
+    });
+  }
+
   function renderCompanyBreakdown() {
     var tbody = document.getElementById("companyBreakdownBody");
     var cap = DATA.capital;
@@ -444,6 +483,7 @@
     renderCapital();
     renderCompanyBreakdown();
     renderCapitalCharts();
+    renderEarnings();
     renderCompute();
     renderPower();
     renderInfrastructure();

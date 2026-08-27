@@ -399,6 +399,91 @@ if ($companyResults.Count -lt $COMPANIES.Count) {
     }
 }
 
+# ===================== SEC EDGAR: recent earnings, all six (capex-tracked five + NVDA) =====================
+# Separate from the capex section above on purpose - NVIDIA's own capex is chip-fab/R&D spend,
+# a fundamentally different thing than hyperscaler data-center buildout capex, so it doesn't
+# belong in the "Aggregate Hyperscaler TTM Capex" chart. But NVDA's revenue/earnings are the
+# best demand-side confirmation signal for the whole AI capex story (it's what the hyperscalers
+# are buying with that capex), and excluding NVDA's earnings entirely meant a just-filed NVDA
+# 10-Q was invisible anywhere on this tab. Reuses the same standalone-quarter derivation as the
+# capex section above, plus surfaces each fact's own SEC "filed" date so a same-day release is
+# actually visible as recent, not just implied by the period-end date.
+$EARNINGS_COMPANIES = [ordered]@{
+    MSFT  = @{ Cik = "0000789019"; Name = "Microsoft" }
+    GOOGL = @{ Cik = "0001652044"; Name = "Alphabet" }
+    AMZN  = @{ Cik = "0001018724"; Name = "Amazon" }
+    META  = @{ Cik = "0001326801"; Name = "Meta Platforms" }
+    ORCL  = @{ Cik = "0001341439"; Name = "Oracle" }
+    NVDA  = @{ Cik = "0001045810"; Name = "NVIDIA" }
+}
+$NETINCOME_TAGS = @("NetIncomeLoss", "ProfitLoss")
+
+Write-Output "Fetching SEC EDGAR recent earnings (all six)..."
+$earningsResults = [ordered]@{}
+foreach ($ticker in $EARNINGS_COMPANIES.Keys) {
+    $cik = $EARNINGS_COMPANIES[$ticker].Cik
+    Write-Output "  $ticker earnings (CIK $cik)..."
+
+    $revConcept = Get-FirstAvailableConcept $cik $REVENUE_TAGS
+    $niConcept = Get-FirstAvailableConcept $cik $NETINCOME_TAGS
+    if (-not $revConcept -or -not $niConcept) {
+        Write-Output "    SKIPPED - missing revenue or net income tag"
+        continue
+    }
+
+    $revQ = Get-StandaloneQuarters $revConcept.facts
+    $niQ = Get-StandaloneQuarters $niConcept.facts
+    if ($revQ.Count -eq 0 -or $niQ.Count -eq 0) {
+        Write-Output "    SKIPPED - no standalone quarters derivable"
+        continue
+    }
+
+    $latestRevQ = $revQ[$revQ.Count - 1]
+    $latestNiQ = $niQ[$niQ.Count - 1]
+    # The raw fact (not the derived standalone-quarter value) carries SEC's own "filed" date -
+    # when the quarter is a derived (calc) fiscal-Q4, this is the 10-K's filed date, which is
+    # still the correct "when did this become public" answer.
+    $latestNiFact = $niConcept.facts | Where-Object { $_.end -eq $latestNiQ.End } | Select-Object -Last 1
+    $filedDate = if ($latestNiFact) { $latestNiFact.filed } else { $null }
+
+    $niYoyQ = Find-YoyQuarter $niQ $latestNiQ.End
+    $niYoyPct = if ($niYoyQ -and $niYoyQ.Value -ne 0) { (($latestNiQ.Value / $niYoyQ.Value) - 1.0) * 100.0 } else { $null }
+    $revYoyQ = Find-YoyQuarter $revQ $latestRevQ.End
+    $revYoyPct = if ($revYoyQ -and $revYoyQ.Value -ne 0) { (($latestRevQ.Value / $revYoyQ.Value) - 1.0) * 100.0 } else { $null }
+    $netMarginPct = if ($latestRevQ.Value -ne 0) { ($latestNiQ.Value / $latestRevQ.Value) * 100.0 } else { $null }
+
+    $earningsResults[$ticker] = @{
+        name            = $EARNINGS_COMPANIES[$ticker].Name
+        periodEnd       = $latestNiQ.End
+        periodStart     = $latestNiQ.Start
+        filedDate       = $filedDate
+        revenue         = [math]::Round($latestRevQ.Value, 0)
+        revenueYoYPct   = if ($null -ne $revYoyPct) { [math]::Round($revYoyPct, 2) } else { $null }
+        netIncome       = [math]::Round($latestNiQ.Value, 0)
+        netIncomeYoYPct = if ($null -ne $niYoyPct) { [math]::Round($niYoyPct, 2) } else { $null }
+        netMarginPct    = if ($null -ne $netMarginPct) { [math]::Round($netMarginPct, 2) } else { $null }
+    }
+    Write-Output ("    NI thru {0}: {1:N0}  (filed {2})" -f $latestNiQ.End, $latestNiQ.Value, $filedDate)
+    Start-Sleep -Milliseconds 150
+}
+
+# Same fail-stale pattern as the capital section: a partial SEC outage falls back to the
+# existing cached earnings section (per-company - never zero-fills a company that failed).
+$earningsStatus = "ok"
+if ($earningsResults.Count -lt $EARNINGS_COMPANIES.Count) {
+    Write-Host ("::warning::Only {0} of {1} companies resolved for earnings." -f $earningsResults.Count, $EARNINGS_COMPANIES.Count)
+    $earningsStatus = if ($earningsResults.Count -gt 0) { "partial" } else { "error" }
+}
+if ($existingPayload -and $existingPayload.earnings -and $existingPayload.earnings.companies) {
+    foreach ($prop in $existingPayload.earnings.companies.PSObject.Properties) {
+        if (-not $earningsResults.Contains($prop.Name)) {
+            Write-Output ("  {0}: falling back to cached earnings (not resolved this run)" -f $prop.Name)
+            $earningsResults[$prop.Name] = $prop.Value
+        }
+    }
+}
+$earningsSection = @{ companies = $earningsResults }
+
 # ===================== FRED: semiconductor / infrastructure / capital cycle =====================
 
 # Never throws - a network/HTTP failure becomes an empty array, which Test-SeriesSane rejects
@@ -560,7 +645,7 @@ $power = @{
 
 # ===================== Write payload (atomic) =====================
 
-$sourceStatus = @{ sec = $secStatus }
+$sourceStatus = @{ sec = $secStatus; secEarnings = $earningsStatus }
 foreach ($k in $fredSourceStatus.Keys) { $sourceStatus[$k] = $fredSourceStatus[$k] }
 
 # If BOTH the SEC-derived capital section AND every FRED/EIA series are unusable, there's
@@ -588,6 +673,7 @@ $payload = @{
     lastObservation        = $lastObservation
     sourceStatus           = $sourceStatus
     capital = $capitalSection
+    earnings = $earningsSection
     compute = $compute
     power = $power
     infrastructure = $infrastructure
