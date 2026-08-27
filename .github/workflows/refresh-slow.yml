@@ -1,5 +1,11 @@
 name: Slow refresh (BTC canonical close, Credit, Energy, AI - once daily)
 
+# 2026-08-27 note: every scheduled workflow in this repo went silent simultaneously around
+# 2026-08-26 16:36-16:37 UTC despite healthy, unrelated cron schedules - manual workflow_dispatch
+# ran fine (confirmed via GitHub UI), so this was a stuck schedule trigger, not an account block
+# or a workflow bug. This edit exists to re-arm the schedule (a push to the workflow file is a
+# known, if undocumented, fix for a stalled GitHub Actions cron).
+
 # Once daily, 06:00 UTC - comfortably after UTC midnight so blockchain-adjacent/EIA/SEC daily
 # sources have published, independent of any single timezone. No DST-aware gating needed here
 # (unlike the two hourly workflows) since a once-daily job doesn't need wall-clock ET precision,

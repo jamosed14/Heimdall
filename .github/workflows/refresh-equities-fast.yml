@@ -1,5 +1,11 @@
 name: Equities Fast refresh (Yahoo quotes, 15-min, pre/regular/post-market weekdays)
 
+# 2026-08-27 note: every scheduled workflow in this repo went silent simultaneously around
+# 2026-08-26 16:36-16:37 UTC despite healthy, unrelated cron schedules - manual workflow_dispatch
+# ran fine (confirmed via GitHub UI), so this was a stuck schedule trigger, not an account block
+# or a workflow bug. This edit exists to re-arm the schedule (a push to the workflow file is a
+# known, if undocumented, fix for a stalled GitHub Actions cron).
+
 # Split out from Market Fast on 2026-08-20 so equities could refresh faster than the FRED-bundled
 # schedule it used to share, and so it could actually capture pre-market/after-hours prints
 # (fetch_equities_data.ps1 now reads meta.preMarketPrice/postMarketPrice when Yahoo's marketState

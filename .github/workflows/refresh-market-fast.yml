@@ -1,5 +1,11 @@
 name: Market Fast refresh (Yahoo DXY/futures + FRED, hourly weekdays)
 
+# 2026-08-27 note: every scheduled workflow in this repo went silent simultaneously around
+# 2026-08-26 16:36-16:37 UTC despite healthy, unrelated cron schedules - manual workflow_dispatch
+# ran fine (confirmed via GitHub UI), so this was a stuck schedule trigger, not an account block
+# or a workflow bug. This edit exists to re-arm the schedule (a push to the workflow file is a
+# known, if undocumented, fix for a stalled GitHub Actions cron).
+
 # Target: 9:35, 10:35, 11:35, 12:35, 13:35, 14:35, 15:35 ET (every hour on :35) plus a 4:10 PM ET
 # close pass, weekdays only. Runs fetch_macro_data.ps1 only - equities was split out to its own
 # refresh-equities-fast.yml on 2026-08-20 so it could run on a faster (15-min, pre/post-market
