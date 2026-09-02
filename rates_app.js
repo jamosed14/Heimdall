@@ -135,6 +135,89 @@
     });
   }
 
+  // ---------- GLOBAL SOVEREIGN 10Y ----------
+  var GLOBAL = window.GLOBAL_RATES_DATA;
+  var GLOBAL_ORDER = ["US", "JP", "DE", "GB", "CA", "AU"];
+  var GLOBAL_COLORS = { US: "#f7931a", JP: "#c0574a", DE: "#7f97ab", GB: "#7fae55", CA: "#a89a7c", AU: "#ab7d45" };
+
+  // Two-letter country code -> flag emoji via Unicode regional indicator symbols (no image
+  // assets needed - same technique used for currency/country badges elsewhere on the web).
+  function flagEmoji(cc) {
+    if (!cc || cc.length !== 2) return "";
+    var base = 0x1F1E6 - 65; // regional indicator 'A' minus ASCII 'A'
+    return String.fromCodePoint(cc.toUpperCase().charCodeAt(0) + base, cc.toUpperCase().charCodeAt(1) + base);
+  }
+
+  function renderGlobalRatesCards() {
+    var el = document.getElementById("group-global-rates");
+    if (!el) return; // section not present on this page build
+    if (!GLOBAL || !GLOBAL.countries) {
+      el.innerHTML = '<div class="stat-card"><div class="stat-label">Global Sovereign 10Y</div><div class="stat-value">—</div><div class="stat-sub">no cached data — run fetch_global_rates_data.ps1</div></div>';
+      return;
+    }
+    GLOBAL_ORDER.forEach(function (cc) {
+      var c = GLOBAL.countries[cc];
+      var card = document.createElement("div");
+      card.className = "stat-card";
+      if (!c || c.value === null || c.value === undefined) {
+        card.innerHTML = '<div class="stat-label">' + cc + '</div><div class="stat-value">—</div><div class="stat-sub">data unavailable</div>';
+        el.appendChild(card);
+        return;
+      }
+      var chips = buildChip("1D", fmtBpsChip(c.chg1d / 100), c.chg1d) +
+        buildChip("1W", fmtBpsChip(c.chg1w / 100), c.chg1w) +
+        buildChip("1M", fmtBpsChip(c.chg1m / 100), c.chg1m);
+      card.innerHTML =
+        '<div class="stat-label">' + flagEmoji(cc) + " " + c.name + "</div>" +
+        '<div class="stat-value">' + fmtPct(c.value) + "</div>" +
+        '<div class="chg-row">' + chips + "</div>";
+      if (window.HeimdallFormat) {
+        window.HeimdallFormat.applyTooltip(card.querySelector(".stat-label"), c.asOfDate, c.freq, GLOBAL.generatedAtUtc);
+      }
+      el.appendChild(card);
+    });
+  }
+
+  function buildGlobalRatesLegend() {
+    var el = document.getElementById("globalRatesLegend");
+    if (!el) return;
+    el.innerHTML = GLOBAL_ORDER.map(function (cc) {
+      var name = (GLOBAL.countries[cc] && GLOBAL.countries[cc].name) || cc;
+      return '<span class="legend-item"><span class="legend-dot" style="background:' + GLOBAL_COLORS[cc] + '"></span>' + flagEmoji(cc) + " " + name + "</span>";
+    }).join("");
+  }
+
+  function renderGlobalRatesChart() {
+    if (!GLOBAL || !GLOBAL.series) return;
+    var canvas = document.getElementById("globalRatesChart");
+    if (!canvas) return;
+
+    var earliestDate = null;
+    GLOBAL_ORDER.forEach(function (cc) {
+      (GLOBAL.series[cc] || []).forEach(function (p) {
+        if (!earliestDate || p.d < earliestDate) earliestDate = p.d;
+      });
+    });
+    var sub = document.getElementById("globalRatesChartSub");
+    if (sub && earliestDate) {
+      sub.textContent = "Basis points, indexed to 0 at each country's first tracked observation (as far back as " + earliestDate + ") — shows repricing intensity independent of the starting yield level";
+    }
+
+    window.HeimdallCharts.create({
+      canvasId: "globalRatesChart", rangeToggleId: "globalRatesRangeToggle", csvButtonId: "globalRatesCsvBtn",
+      csvFilename: "global_sovereign_10y_cumulative_change", defaultRange: "1Y",
+      ranges: { "1M": 30, "3M": 91, "1Y": 365, "MAX": null },
+      series: GLOBAL_ORDER.map(function (cc) {
+        var rows = (GLOBAL.series[cc] || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+        var base = rows.length ? rows[0].v : null;
+        var idxRows = (base === null || base === undefined) ? [] : rows.map(function (p) { return { d: p.d, v: (p.v - base) * 100 }; });
+        return { key: cc, label: cc, color: GLOBAL_COLORS[cc] || "#9c8f76", width: cc === "US" ? 3 : 2, rows: idxRows };
+      }),
+      yFormatter: function (v) { return (v > 0 ? "+" : "") + Math.round(v) + "bp"; }
+    });
+    buildGlobalRatesLegend();
+  }
+
   function exportCurveCsv() {
     if (!window.HeimdallFormat) return;
     var curve = DATA.yieldCurve;
@@ -151,6 +234,10 @@
   renderCards();
   renderYieldCurve();
   renderHistoryChart();
+  // Independent of MACRO_DATA - a missing/failed global-rates fetch never blocks the rest of
+  // this page.
+  renderGlobalRatesCards();
+  renderGlobalRatesChart();
 
   var curveCsvBtn = document.getElementById("curveCsvBtn");
   if (curveCsvBtn) curveCsvBtn.addEventListener("click", exportCurveCsv);
