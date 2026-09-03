@@ -218,26 +218,18 @@
     var canvas = document.getElementById("globalRatesChart");
     if (!canvas) return;
 
-    var earliestDate = null;
-    GLOBAL_ORDER.forEach(function (cc) {
-      (GLOBAL.series[cc] || []).forEach(function (p) {
-        if (!earliestDate || p.d < earliestDate) earliestDate = p.d;
-      });
-    });
-    var sub = document.getElementById("globalRatesChartSub");
-    if (sub && earliestDate) {
-      sub.textContent = "Basis points, indexed to 0 at each country's first tracked observation (as far back as " + earliestDate + ") — shows repricing intensity independent of the starting yield level";
-    }
-
+    // Raw % rows passed straight through - rebasing now happens inside charts.js, AFTER it
+    // filters to whichever range is selected, against the first point actually visible in that
+    // window. Precomputing the index here against each series' absolute first-ever observation
+    // (the old approach) meant every line still opened hundreds of bp away from 0 on a "1M"
+    // click, carrying the full accumulated history's offset instead of that window's own.
     window.HeimdallCharts.create({
       canvasId: "globalRatesChart", rangeToggleId: "globalRatesRangeToggle", csvButtonId: "globalRatesCsvBtn",
       csvFilename: "global_sovereign_10y_cumulative_change", defaultRange: "1Y",
       ranges: { "1M": 30, "3M": 91, "1Y": 365, "MAX": null },
+      rebase: function (baseY, y) { return (y - baseY) * 100; },
       series: GLOBAL_ORDER.map(function (cc) {
-        var rows = (GLOBAL.series[cc] || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
-        var base = rows.length ? rows[0].v : null;
-        var idxRows = (base === null || base === undefined) ? [] : rows.map(function (p) { return { d: p.d, v: (p.v - base) * 100 }; });
-        return { key: cc, label: cc, color: GLOBAL_COLORS[cc] || "#9c8f76", width: cc === "US" ? 3 : 2, rows: idxRows };
+        return { key: cc, label: cc, color: GLOBAL_COLORS[cc] || "#9c8f76", width: cc === "US" ? 3 : 2, rows: GLOBAL.series[cc] || [] };
       }),
       yFormatter: function (v) { return (v > 0 ? "+" : "") + Math.round(v) + "bp"; }
     });

@@ -44,9 +44,19 @@ window.HeimdallCharts = (function () {
     return points.filter(function (p) { return p.x >= cutoff; });
   }
 
-  function fmtAxisDate(ms) {
+  var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Axis granularity adapts to how much time is actually visible, not to which range button
+  // was clicked - a 1M-range chart and a 1Y-range chart both just have "however many days are
+  // in the filtered data" once rebasing/filtering has happened, so this is driven by the real
+  // span of what's on screen. Short windows need day-level labels ("Aug 05") or every tick
+  // would repeat the same month/year (the bug this replaces); long windows would be unreadably
+  // dense at day-level, so those step up to month or year granularity.
+  function fmtAxisDate(ms, spanDays) {
     var d = new Date(ms);
-    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0");
+    if (spanDays <= 120) return MONTH_ABBR[d.getUTCMonth()] + " " + String(d.getUTCDate()).padStart(2, "0");
+    if (spanDays <= 3 * 365) return MONTH_ABBR[d.getUTCMonth()] + " " + d.getUTCFullYear();
+    return String(d.getUTCFullYear());
   }
 
   function create(opts) {
@@ -95,9 +105,19 @@ window.HeimdallCharts = (function () {
 
     function build() {
       var datasets = opts.series.map(function (s, i) {
+        var pts = filterPoints(seriesPoints[i], currentRange, ranges);
+        // Rebasing happens AFTER range-filtering, against the first point actually visible in
+        // THIS window - not against the series' absolute first-ever point. Rebasing before
+        // filtering (the bug this replaces) meant switching to "1M" still carried whatever
+        // cumulative offset had built up since the full history's start, so every line opened
+        // hundreds of bp away from 0 instead of at it.
+        if (opts.rebase && pts.length > 0) {
+          var baseY = pts[0].y;
+          pts = pts.map(function (p) { return { x: p.x, y: opts.rebase(baseY, p.y) }; });
+        }
         return {
           label: s.label,
-          data: filterPoints(seriesPoints[i], currentRange, ranges),
+          data: pts,
           borderColor: s.color,
           backgroundColor: s.fill ? s.color.replace(")", ",0.08)").replace("rgb", "rgba") : "transparent",
           borderWidth: s.width || 3,
@@ -110,6 +130,14 @@ window.HeimdallCharts = (function () {
           spanGaps: true
         };
       });
+
+      // Real visible span (across every dataset actually being plotted this build), used to
+      // pick x-axis tick granularity - see fmtAxisDate. Computed from what's on screen, not
+      // from the range-button's nominal day count, so it's correct even when a series has less
+      // history than the selected range implies (e.g. a just-added series under a "MAX" click).
+      var allX = [];
+      datasets.forEach(function (ds) { ds.data.forEach(function (p) { allX.push(p.x); }); });
+      var spanDays = allX.length > 1 ? (Math.max.apply(null, allX) - Math.min.apply(null, allX)) / 86400000 : 0;
 
       var config = {
         type: "line",
@@ -158,7 +186,7 @@ window.HeimdallCharts = (function () {
                 // buffer, that compressed last gap renders two labels overlapping instead of
                 // one being dropped. Default padding (3px) isn't enough for this monospace font.
                 autoSkipPadding: 24,
-                callback: function (value) { return fmtAxisDate(value); }
+                callback: function (value) { return fmtAxisDate(value, spanDays); }
               }
             },
             y: (function () {

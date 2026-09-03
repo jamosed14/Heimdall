@@ -170,16 +170,16 @@
     });
     buildCdsLegend("cdsLegend", order);
 
-    // Indexed-to-100: each name normalized to its own first tracked observation, so repricing
+    // Indexed-to-100: each name normalized to its own first observation IN THE CURRENTLY
+    // SELECTED WINDOW (rebasing happens inside charts.js, after range-filtering), so repricing
     // intensity is comparable across names regardless of starting spread level (e.g. MSFT at
-    // 46bp widening 20% should read the same visual intensity as ORCL at 212bp widening 20%).
+    // 46bp widening 20% should read the same visual intensity as ORCL at 212bp widening 20%) -
+    // and switching to "1M" shows that month's own repricing, not the whole history's.
     window.HeimdallCharts.create({
       canvasId: "cdsIndexedChart", rangeToggleId: "cdsRangeToggle", defaultRange: "MAX", ranges: CDS_CHART_RANGES,
+      rebase: function (baseY, y) { return (y / baseY) * 100; },
       series: order.map(function (ticker) {
-        var rows = (CDS.tickers[ticker].series || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
-        var base = rows.length ? rows[0].v : null;
-        var idxRows = (!base || base <= 0) ? [] : rows.map(function (p) { return { d: p.d, v: (p.v / base) * 100 }; });
-        return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: idxRows };
+        return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: CDS.tickers[ticker].series || [] };
       }),
       yFormatter: function (v) { return v.toFixed(0); }
     });
