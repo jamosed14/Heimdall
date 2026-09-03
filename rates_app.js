@@ -148,6 +148,31 @@
     return String.fromCodePoint(cc.toUpperCase().charCodeAt(0) + base, cc.toUpperCase().charCodeAt(1) + base);
   }
 
+  // DeltaNominal = DeltaRealYield + DeltaBreakevenInflation - only rendered where a genuinely
+  // matched-tenor real yield was sourceable (US, UK, Australia; see fetch_global_rates_data.ps1
+  // for exactly why Germany/Japan aren't here and Canada gets a differently-labeled line instead
+  // of a computed breakeven). A global nominal selloff with real yields driving it reads as a
+  // capital-demand/r*/fiscal-supply story; with breakevens driving it, an inflation/debasement
+  // story; both together is the "considerably nastier" case.
+  // chg1m is stored in bp already; fmtBpsChip expects %-points and multiplies by 100, so divide
+  // back down here - but guard null first, since null/100 coerces to 0 in JS (a false "+0bp"
+  // reading, not the "not enough history yet" it actually means for a just-added series).
+  function fmtBpChg1m(stat) {
+    return (stat.chg1m === null || stat.chg1m === undefined) ? "—" : fmtBpsChip(stat.chg1m / 100);
+  }
+  function decompSubline(c) {
+    if (c.real10y && c.breakeven10y) {
+      var r = c.real10y, b = c.breakeven10y;
+      return '<div class="stat-subline">real ' + fmtPct(r.value) + " (" + fmtBpChg1m(r) + " 1M) · breakeven " +
+        fmtPct(b.value) + " (" + fmtBpChg1m(b) + " 1M)</div>";
+    }
+    if (c.realLongTerm) {
+      return '<div class="stat-subline">RRB real yield (long-term, not 10Y-matched): ' + fmtPct(c.realLongTerm.value) +
+        " (" + fmtBpChg1m(c.realLongTerm) + " 1M)</div>";
+    }
+    return "";
+  }
+
   function renderGlobalRatesCards() {
     var el = document.getElementById("group-global-rates");
     if (!el) return; // section not present on this page build
@@ -170,6 +195,7 @@
       card.innerHTML =
         '<div class="stat-label">' + flagEmoji(cc) + " " + c.name + "</div>" +
         '<div class="stat-value">' + fmtPct(c.value) + "</div>" +
+        decompSubline(c) +
         '<div class="chg-row">' + chips + "</div>";
       if (window.HeimdallFormat) {
         window.HeimdallFormat.applyTooltip(card.querySelector(".stat-label"), c.asOfDate, c.freq, GLOBAL.generatedAtUtc);

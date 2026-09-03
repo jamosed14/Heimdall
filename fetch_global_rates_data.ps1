@@ -27,17 +27,30 @@
 #              consistent with the concurrent global duration selloff), not confirmed via a
 #              documented series ID. Worth a spot-check against a news-reported Bund yield if
 #              this ever looks visibly wrong.
-#   UK:        Bank of England "Government Liability Curve" nominal spot curve - published as a
-#              daily-updated Excel workbook (OOXML), not CSV. Sheet "4. spot curve" (internal
-#              file worksheets/sheet5.xml, confirmed via workbook.xml/rels), maturities run in
-#              0.5-year steps starting column B=0.5Y - column U lands on exactly 10.0Y. Parsed
-#              by unzipping the xlsx (it's a zip) and regexing the raw sheet XML directly - no
-#              Excel-parsing module dependency. Pulls the small "latest" (current-month) file
-#              every run plus the bounded "2025 to present" archive file (~1.5MB) for real
-#              history, NOT the full 8-file/42MB 1979-present archive - that's a one-time-backfill
-#              size, not a daily-refetch size.
+#   UK:        Bank of England "Government Liability Curve" spot curves - published as daily-
+#              updated Excel workbooks (OOXML), not CSV. Sheet "4. spot curve" (internal file
+#              worksheets/sheet5.xml, confirmed via workbook.xml/rels). Parsed by unzipping the
+#              xlsx (it's a zip) and regexing the raw sheet XML directly - no Excel-parsing
+#              module dependency. Nominal pulls the small "latest" (current-month) file every
+#              run plus the bounded "2025 to present" archive (~1.5MB) for real history, NOT the
+#              full 8-file/42MB 1979-present archive. Real and Inflation (breakeven) curves only
+#              pull the current-month file (shallower history, but BoE publishes true matched-
+#              tenor real and breakeven curves directly - not derived).
 #   Canada:    Bank of Canada Valet API, series BD.CDN.10YR.DQ.YLD - clean documented REST API.
 #   Australia: RBA statistical table F2 (capital market yields) - daily CSV, real history to 2013.
+#              Also carries an "Indexed Bond" column at the same 10Y tenor, same file/date.
+#
+# Real yield / breakeven decomposition (DeltaNominal = DeltaReal + DeltaBreakeven), where a
+# genuinely matched-tenor real yield exists: US (FRED DFII10 real + T10YIE breakeven, both
+# official), UK (BoE's own matched-tenor Real/Inflation spot curves - a published breakeven, not
+# derived - NOTE their column layout differs from the Nominal curve: Real/Inflation maturity
+# headers start at 2.5Y not 0.5Y, so the 10Y column letter is NOT the same as Nominal's; the
+# parser locates it dynamically per workbook, not by a hardcoded column), Australia (RBA's
+# indexed-bond column - breakeven = nominal minus real, both from the same file/date/tenor, a
+# clean subtraction). Canada's only free real yield is a long-term (not 10Y) Real Return Bond -
+# kept as its own separate field, never combined into a breakeven, since that tenor mismatch
+# would make a computed "Canada breakeven" actively misleading. Germany and Japan: no free
+# matched-tenor real-yield source was found - not sourced, not guessed.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -68,10 +81,10 @@ function Get-ExistingSeries($key) {
 
 $UA = @{ "User-Agent" = "Heimdall Catallaxy (personal research dashboard) jamosed14@gmail.com" }
 
-# ---------- US: FRED DGS10 ----------
-function Get-UsSeries() {
+# ---------- US: FRED DGS10 (nominal), DFII10 (real/TIPS), T10YIE (breakeven) ----------
+function Get-FredSimpleSeries($seriesId) {
     try {
-        $uri = "https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key=$FRED_API_KEY&file_type=json&observation_start=2000-01-01"
+        $uri = "https://api.stlouisfed.org/fred/series/observations?series_id=$seriesId&api_key=$FRED_API_KEY&file_type=json&observation_start=2000-01-01"
         $resp = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
         $out = New-Object System.Collections.Generic.List[object]
         foreach ($o in $resp.observations) {
@@ -79,10 +92,13 @@ function Get-UsSeries() {
         }
         return , ($out | Sort-Object Date)
     } catch {
-        Write-Host ("::error::US (FRED DGS10) fetch failed: {0}" -f $_.Exception.Message)
+        Write-Host ("::error::FRED {0} fetch failed: {1}" -f $seriesId, $_.Exception.Message)
         return @()
     }
 }
+function Get-UsSeries() { return Get-FredSimpleSeries "DGS10" }
+function Get-UsRealSeries() { return Get-FredSimpleSeries "DFII10" }
+function Get-UsBreakevenSeries() { return Get-FredSimpleSeries "T10YIE" }
 
 # ---------- Japan: MOF JGB yield CSV ----------
 function Parse-JgbCsv($csvText) {
@@ -144,8 +160,14 @@ function Get-GermanySeries() {
     }
 }
 
-# ---------- UK: Bank of England GLC nominal spot curve (Excel) ----------
-function Get-BoeSheet5Xml($url) {
+# ---------- UK: Bank of England GLC spot curves (nominal/real/inflation), Excel ----------
+# IMPORTANT: the Real and Inflation (breakeven) curve workbooks do NOT share the Nominal
+# workbook's column layout - Nominal's maturity header starts at 0.5Y (so 10Y lands on column
+# U), but Real/Inflation start at 2.5Y (so their column U is 12Y, and 10Y is actually column Q).
+# Confirmed by reading each workbook's own row-4 maturity header live before assuming anything -
+# hardcoding one column letter for both would have silently mislabeled a 12Y point as 10Y.
+# Because of that, the column is located dynamically per workbook rather than hardcoded.
+function Get-BoeSheet5XmlList($url, $namePattern) {
     $tmpZip = [System.IO.Path]::GetTempFileName()
     try {
         Invoke-WebRequest -Uri $url -Headers $UA -OutFile $tmpZip -TimeoutSec 60 -UseBasicParsing
@@ -153,7 +175,7 @@ function Get-BoeSheet5Xml($url) {
         $outerZip = [System.IO.Compression.ZipFile]::OpenRead($tmpZip)
         try {
             # The outer download is a zip of one or more .xlsx files (themselves zips).
-            $xlsxEntries = $outerZip.Entries | Where-Object { $_.Name -like "*Nominal*current month*.xlsx" -or $_.Name -like "*2025 to present*.xlsx" -or $_.Name -like "*Nominal*.xlsx" }
+            $xlsxEntries = $outerZip.Entries | Where-Object { $_.Name -like $namePattern }
             $results = New-Object System.Collections.Generic.List[string]
             foreach ($entry in $xlsxEntries) {
                 $tmpXlsx = [System.IO.Path]::GetTempFileName()
@@ -176,10 +198,21 @@ function Get-BoeSheet5Xml($url) {
         Remove-Item $tmpZip -ErrorAction SilentlyContinue
     }
 }
-function Parse-BoeSpotCurve10Y($xml) {
+# Finds which column letter holds the target maturity (e.g. 10.0) by reading row 4's own
+# maturity header, then extracts that column's values for every data row (>=6).
+function Parse-BoeSpotCurveAtMaturity($xml, [double]$targetMaturity) {
     $out = New-Object System.Collections.Generic.List[object]
+    $headerMatch = [regex]::Match($xml, '<row r="4"[^>]*>(.*?)</row>')
+    if (-not $headerMatch.Success) { return , $out }
+    $headerCells = [regex]::Matches($headerMatch.Groups[1].Value, '<c r="([A-Z]+)4"[^>]*><v>([\d.]+)</v></c>')
+    $targetCol = $null
+    foreach ($hc in $headerCells) {
+        if ([math]::Abs([double]$hc.Groups[2].Value - $targetMaturity) -lt 0.01) { $targetCol = $hc.Groups[1].Value; break }
+    }
+    if (-not $targetCol) { return , $out }
+
     $dateMatches = [regex]::Matches($xml, '<c r="A(\d+)"[^>]*><v>([\d.]+)</v></c>')
-    $valMatches = [regex]::Matches($xml, '<c r="U(\d+)"[^>]*><v>(-?[\d.]+)</v></c>')
+    $valMatches = [regex]::Matches($xml, '<c r="' + $targetCol + '(\d+)"[^>]*><v>(-?[\d.]+)</v></c>')
     $dates = @{}
     foreach ($m in $dateMatches) { $dates[$m.Groups[1].Value] = [double]$m.Groups[2].Value }
     foreach ($m in $valMatches) {
@@ -192,42 +225,68 @@ function Parse-BoeSpotCurve10Y($xml) {
     }
     return , $out
 }
+function Merge-ByDateLatestWins($lists) {
+    $byDate = [ordered]@{}
+    foreach ($list in $lists) { foreach ($p in $list) { $byDate[$p.Date] = $p.Value } }
+    return , $(foreach ($k in ($byDate.Keys | Sort-Object)) { [PSCustomObject]@{ Date = $k; Value = $byDate[$k] } })
+}
 function Get-UkSeries() {
     try {
         $sheets = @()
-        $sheets += Get-BoeSheet5Xml "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/latest-yield-curve-data.zip"
-        $sheets += Get-BoeSheet5Xml "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/glcnominalddata.zip"
-        $byDate = [ordered]@{}
-        foreach ($xml in $sheets) {
-            foreach ($p in (Parse-BoeSpotCurve10Y $xml)) { $byDate[$p.Date] = $p.Value }
-        }
-        $out = foreach ($k in ($byDate.Keys | Sort-Object)) { [PSCustomObject]@{ Date = $k; Value = $byDate[$k] } }
-        return , $out
+        $sheets += Get-BoeSheet5XmlList "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/latest-yield-curve-data.zip" "*Nominal*.xlsx"
+        $sheets += Get-BoeSheet5XmlList "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/glcnominalddata.zip" "*2025 to present*.xlsx"
+        return Merge-ByDateLatestWins ($sheets | ForEach-Object { , (Parse-BoeSpotCurveAtMaturity $_ 10.0) })
     } catch {
-        Write-Host ("::error::UK (Bank of England) fetch failed: {0}" -f $_.Exception.Message)
+        Write-Host ("::error::UK (Bank of England, nominal) fetch failed: {0}" -f $_.Exception.Message)
+        return @()
+    }
+}
+function Get-UkRealSeries() {
+    try {
+        $sheets = Get-BoeSheet5XmlList "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/latest-yield-curve-data.zip" "*Real*.xlsx"
+        return Merge-ByDateLatestWins ($sheets | ForEach-Object { , (Parse-BoeSpotCurveAtMaturity $_ 10.0) })
+    } catch {
+        Write-Host ("::error::UK (Bank of England, real) fetch failed: {0}" -f $_.Exception.Message)
+        return @()
+    }
+}
+function Get-UkBreakevenSeries() {
+    try {
+        $sheets = Get-BoeSheet5XmlList "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/latest-yield-curve-data.zip" "*Inflation*.xlsx"
+        return Merge-ByDateLatestWins ($sheets | ForEach-Object { , (Parse-BoeSpotCurveAtMaturity $_ 10.0) })
+    } catch {
+        Write-Host ("::error::UK (Bank of England, breakeven/inflation) fetch failed: {0}" -f $_.Exception.Message)
         return @()
     }
 }
 
 # ---------- Canada: Bank of Canada Valet API ----------
-function Get-CanadaSeries() {
+function Get-BocValetSeries($seriesName) {
     try {
-        $uri = "https://www.bankofcanada.ca/valet/observations/BD.CDN.10YR.DQ.YLD/json?start_date=2000-01-01"
+        $uri = "https://www.bankofcanada.ca/valet/observations/$seriesName/json?start_date=2000-01-01"
         $resp = Invoke-RestMethod -Uri $uri -Headers $UA -UseBasicParsing -TimeoutSec 30
         $out = New-Object System.Collections.Generic.List[object]
         foreach ($o in $resp.observations) {
-            $v = $o.'BD.CDN.10YR.DQ.YLD'.v
+            $v = $o.$seriesName.v
             if ($null -ne $v -and $v -ne "") { $out.Add([PSCustomObject]@{ Date = $o.d; Value = [double]$v }) }
         }
         return , ($out | Sort-Object Date)
     } catch {
-        Write-Host ("::error::Canada (Bank of Canada Valet) fetch failed: {0}" -f $_.Exception.Message)
+        Write-Host ("::error::Canada ({0}) fetch failed: {1}" -f $seriesName, $_.Exception.Message)
         return @()
     }
 }
+function Get-CanadaSeries() { return Get-BocValetSeries "BD.CDN.10YR.DQ.YLD" }
+# Real Return Bond yield is labeled "long-term" by the Bank of Canada, NOT a clean 10Y point -
+# Canada's RRB program has historically only issued long-dated (~30Y) real bonds, so this is a
+# genuine tenor mismatch against the 10Y nominal above. Surfaced as its own labeled figure, never
+# combined into a computed "Canada breakeven" the way US/UK/Australia are - a mismatched-tenor
+# breakeven would be actively misleading for exactly the real-vs-inflation question this exists
+# to answer.
+function Get-CanadaRrbSeries() { return Get-BocValetSeries "BD.CDN.RRB.DQ.YLD" }
 
-# ---------- Australia: RBA F2 CSV ----------
-function Get-AustraliaSeries() {
+# ---------- Australia: RBA F2 CSV (nominal 10Y + indexed-bond real 10Y, same file/date) ----------
+function Get-AustraliaCsvColumn([int]$colIndex) {
     try {
         $csv = Invoke-RestMethod -Uri "https://www.rba.gov.au/statistics/tables/csv/f2-data.csv" -Headers $UA -TimeoutSec 30
         $out = New-Object System.Collections.Generic.List[object]
@@ -235,20 +294,24 @@ function Get-AustraliaSeries() {
         foreach ($line in $lines) {
             if ($line -notmatch '^\d{1,2}-[A-Za-z]{3}-\d{4},') { continue }
             $cols = $line -split ","
-            if ($cols.Count -lt 5) { continue }
-            $y10 = $cols[4]
-            if ([string]::IsNullOrWhiteSpace($y10)) { continue }
+            if ($cols.Count -le $colIndex) { continue }
+            $v = $cols[$colIndex]
+            if ([string]::IsNullOrWhiteSpace($v)) { continue }
             try {
                 $date = [DateTime]::ParseExact($cols[0], "d-MMM-yyyy", [System.Globalization.CultureInfo]::InvariantCulture)
-                $out.Add([PSCustomObject]@{ Date = $date.ToString("yyyy-MM-dd"); Value = [double]$y10 })
+                $out.Add([PSCustomObject]@{ Date = $date.ToString("yyyy-MM-dd"); Value = [double]$v })
             } catch { continue }
         }
         return , ($out | Sort-Object Date)
     } catch {
-        Write-Host ("::error::Australia (RBA) fetch failed: {0}" -f $_.Exception.Message)
+        Write-Host ("::error::Australia (RBA F2, column {0}) fetch failed: {1}" -f $colIndex, $_.Exception.Message)
         return @()
     }
 }
+# F2's columns are Date,2Y,3Y,5Y,10Y,IndexedBond(10Y real) - confirmed via the file's own header
+# row before writing this. Same file, same date, genuinely matched-tenor real/nominal pair.
+function Get-AustraliaSeries() { return Get-AustraliaCsvColumn 4 }
+function Get-AustraliaRealSeries() { return Get-AustraliaCsvColumn 5 }
 
 # ---------- Fetch + validate + merge, one country at a time (source isolation) ----------
 $COUNTRIES = [ordered]@{
@@ -275,6 +338,50 @@ foreach ($cc in $COUNTRIES.Keys) {
         Write-Output ("  {0}: NO DATA available [{1}]" -f $cc, $result.status)
     }
 }
+
+# ---------- Real yield / breakeven decomposition, where sourceable ----------
+# Delta10Y = DeltaRealYield + DeltaBreakevenInflation. Only wired up where a matched-tenor real
+# yield is actually available: US (FRED DFII10 + published breakeven T10YIE), UK (BoE's own
+# matched-tenor Real and Inflation spot curves - a true published breakeven, not derived), and
+# Australia (RBA's indexed-bond column in the same file/date/10Y-tenor as the nominal column, so
+# breakeven = nominal - real is a clean derivation here). Canada's only free real yield is a
+# long-term (not 10Y) Real Return Bond, kept separate and never combined into a breakeven.
+# Germany and Japan: no free matched-tenor real-yield source was found - not sourced, not guessed.
+$SUPPLEMENTARY = [ordered]@{
+    US_REAL = @{ MinCount = 500; Fetch = { Get-UsRealSeries } }
+    US_BE   = @{ MinCount = 500; Fetch = { Get-UsBreakevenSeries } }
+    # Keyed GB (not UK) to match $COUNTRIES' own country-code key for the United Kingdom -
+    # Get-DecompStat below builds its lookup key as "<countryCode>_REAL"/"<countryCode>_BE", so
+    # this has to agree with $COUNTRIES.GB or the UK's real/breakeven data silently never
+    # attaches to its own country entry (caught by actually running this end to end - it did).
+    GB_REAL = @{ MinCount = 1;   Fetch = { Get-UkRealSeries } }
+    GB_BE   = @{ MinCount = 1;   Fetch = { Get-UkBreakevenSeries } }
+    AU_REAL = @{ MinCount = 500; Fetch = { Get-AustraliaRealSeries } }
+    CA_RRB  = @{ MinCount = 500; Fetch = { Get-CanadaRrbSeries } }
+}
+foreach ($k in $SUPPLEMENTARY.Keys) {
+    $meta = $SUPPLEMENTARY[$k]
+    Write-Output ("Fetching {0}..." -f $k)
+    $fresh = & $meta.Fetch
+    $result = Get-ValidatedMergedSeries -Fresh $fresh -Existing (Get-ExistingSeries $k) -MinCount $meta.MinCount -Name $k
+    $raw[$k] = $result.series
+    $sourceStatus[$k] = $result.status
+    if ($raw[$k].Count -gt 0) {
+        Write-Output ("  {0}: {1} points, latest {2} = {3} [{4}]" -f $k, $raw[$k].Count, $raw[$k][-1].Date, $raw[$k][-1].Value, $result.status)
+    } else {
+        Write-Output ("  {0}: NO DATA available [{1}]" -f $k, $result.status)
+    }
+}
+# Australia publishes no direct breakeven - derive it, but only on dates where both the nominal
+# and real columns actually have a value (same file, so this is a clean subtraction, not a
+# cross-source date-matching guess).
+$auNominalMap = @{}
+foreach ($p in $raw["AU"]) { $auNominalMap[$p.Date] = $p.Value }
+$auBreakeven = New-Object System.Collections.Generic.List[object]
+foreach ($p in $raw["AU_REAL"]) {
+    if ($auNominalMap.ContainsKey($p.Date)) { $auBreakeven.Add([PSCustomObject]@{ Date = $p.Date; Value = $auNominalMap[$p.Date] - $p.Value }) }
+}
+$raw["AU_BE"] = ($auBreakeven | Sort-Object Date)
 
 $CRITICAL = @("US")
 $missingCritical = $CRITICAL | Where-Object { $raw[$_].Count -eq 0 }
@@ -310,6 +417,12 @@ function To-SeriesJson($series) {
     return , $(foreach ($p in $series) { @{ d = $p.Date; v = [math]::Round($p.Value, 3) } })
 }
 
+function Get-DecompStat($key) {
+    if (-not $raw.Contains($key) -or $raw[$key].Count -eq 0) { return $null }
+    $s = Round-Chg (Get-Changes $raw[$key])
+    return @{ value = $s.value; asOfDate = $s.asOfDate; chg1d = $s.chg1d; chg1w = $s.chg1w; chg1m = $s.chg1m }
+}
+
 $countriesOut = [ordered]@{}
 $seriesOut = [ordered]@{}
 foreach ($cc in $COUNTRIES.Keys) {
@@ -323,6 +436,13 @@ foreach ($cc in $COUNTRIES.Keys) {
         chg1w = $stat.chg1w
         chg1m = $stat.chg1m
         freq = "daily"
+        # Matched-tenor real yield / breakeven decomposition (DeltaNominal = DeltaReal +
+        # DeltaBreakeven) - null where not sourced (Germany, Japan), never fabricated.
+        real10y       = Get-DecompStat ($cc + "_REAL")
+        breakeven10y  = Get-DecompStat ($cc + "_BE")
+        # Canada only: a long-term (not 10Y) Real Return Bond yield, kept structurally distinct
+        # from real10y so the front end can never accidentally present it as tenor-matched.
+        realLongTerm  = if ($cc -eq "CA") { Get-DecompStat "CA_RRB" } else { $null }
     }
     $seriesOut[$cc] = To-SeriesJson $raw[$cc]
 }
