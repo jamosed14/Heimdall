@@ -168,6 +168,37 @@ foreach ($k in $YAHOO_FX.Keys) {
     }
 }
 
+# FRED's DGS5/DGS10/DGS30 are the official daily par-yield print, but the Treasury only
+# publishes each day's value the following business day (sometimes not until the *next*
+# scheduled fetch pass catches it) - confirmed live 2026-09-10: DGS10's freshest FRED print
+# was still 2026-09-08 (4.80%) while the actual market had already moved to ~4.94% intraday.
+# CBOE's Treasury yield indices (^TNX/^FVX/^TYX) are genuinely live/intraday, quoted in the
+# same plain-percent convention as the FRED series they replace here (confirmed: ^TNX
+# regularMarketPrice 4.944 vs DGS10's 4.80 stale print, not a *10 index-point convention).
+# Same fix already applied to DXY/FX above, for the same reason. ^IRX (13-week) is
+# deliberately excluded - it's quoted as a discount yield, not DGS3MO's coupon-equivalent
+# convention, so swapping it in would move the 3M card in the wrong direction for reasons
+# that are a quoting-convention mismatch, not freshness. No live Yahoo equivalent exists for
+# 2Y, so DGS2 stays FRED-only. FRED DGS5/DGS10/DGS30 are kept as-is for the history chart and
+# yield-curve chart below - only the headline card VALUE is swapped to the live source.
+Write-Output "Fetching Yahoo Treasury yield indices (live card values for 5Y/10Y/30Y)..."
+$YAHOO_RATES = [ordered]@{
+    FVX_YHOO = "^FVX"
+    TNX_YHOO = "^TNX"
+    TYX_YHOO = "^TYX"
+}
+foreach ($k in $YAHOO_RATES.Keys) {
+    $fresh = Get-YahooDaily $YAHOO_RATES[$k]
+    $result = Get-ValidatedMergedSeries -Fresh $fresh -Existing (Get-ExistingRaw $k) -MinCount 500 -Name $k
+    $raw[$k] = $result.series
+    $sourceStatus[$k] = $result.status
+    if ($raw[$k].Count -gt 0) {
+        Write-Output ("  {0}: {1} points, latest {2} = {3} [{4}]" -f $k, $raw[$k].Count, $raw[$k][-1].Date, $raw[$k][-1].Value, $result.status)
+    } else {
+        Write-Output ("  {0}: NO DATA available [{1}]" -f $k, $result.status)
+    }
+}
+
 # A handful of central series that most of the page's stat blocks derive from - if these are
 # completely unusable (fresh invalid AND no cache), computing changes/spreads against them
 # would cascade nulls through most of the payload. Abort and preserve the whole existing file
@@ -373,9 +404,11 @@ Write-Output "Computing changes..."
 $rates = @{
     y3mo       = Round-Stat (Get-Changes $raw["DGS3MO"]) 2 "daily"
     y2         = Round-Stat (Get-Changes $raw["DGS2"]) 2 "daily"
-    y5         = Round-Stat (Get-Changes $raw["DGS5"]) 2 "daily"
-    y10        = Round-Stat (Get-Changes $raw["DGS10"]) 2 "daily"
-    y30        = Round-Stat (Get-Changes $raw["DGS30"]) 2 "daily"
+    # y5/y10/y30 card values come from Yahoo's live CBOE yield indices, not FRED - see the
+    # Yahoo Treasury fetch above for why. History charts and the yield curve still use FRED.
+    y5         = Round-Stat (Get-Changes $raw["FVX_YHOO"]) 2 "daily"
+    y10        = Round-Stat (Get-Changes $raw["TNX_YHOO"]) 2 "daily"
+    y30        = Round-Stat (Get-Changes $raw["TYX_YHOO"]) 2 "daily"
     real10     = Round-Stat (Get-Changes $raw["DFII10"]) 2 "daily"
     spread2s10 = Round-Stat (Get-Changes $spread2s10) 2 "daily"
     spread3m10 = Round-Stat (Get-Changes $spread3m10) 2 "daily"

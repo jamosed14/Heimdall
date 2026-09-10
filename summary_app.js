@@ -125,7 +125,8 @@
     html += pctRow("10Y Treasury", rates.y10, "chg1d");
     html += pctRow("30Y Treasury", rates.y30, "chg1d");
     html += pctRow("2s10s spread", rates.spread2s10, "chg1d");
-    html += '<div class="summary-block-foot">Treasury daily par yields, as of ' + (rates.y10 ? rates.y10.asOfDate : "—") + " · changes in bps</div>";
+    html += '<div class="summary-block-foot">10Y/30Y live (Yahoo/CBOE) as of ' + (rates.y10 ? rates.y10.asOfDate : "—") +
+      " · 2Y/spread FRED par yield as of " + (rates.y2 ? rates.y2.asOfDate : "—") + " · changes in bps</div>";
     html += "</div>";
 
     // ---- Fed & Liquidity ----

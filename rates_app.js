@@ -260,7 +260,7 @@
   var curveCsvBtn = document.getElementById("curveCsvBtn");
   if (curveCsvBtn) curveCsvBtn.addEventListener("click", exportCurveCsv);
 
-  document.getElementById("asOfNote").textContent = "latest print " + DATA.rates.y10.asOfDate;
+  document.getElementById("asOfNote").textContent = "10Y live " + DATA.rates.y10.asOfDate + " (Yahoo/CBOE) · curve/history " + DATA.series.y10[DATA.series.y10.length - 1].d + " (FRED)";
   document.getElementById("generatedNote").textContent =
-    "Data cached " + DATA.generatedAtUtc + " · source: FRED (St. Louis Fed), computed locally";
+    "Data cached " + DATA.generatedAtUtc + " · 5Y/10Y/30Y headline cards: Yahoo (CBOE yield indices, live) · curve, history, spreads: FRED (St. Louis Fed), computed locally";
 })();
