@@ -97,7 +97,8 @@
 
   // ---------- HYPERSCALER CREDIT (single-name CDS) ----------
   var CDS_METHODOLOGY_TIP =
-    "ICE Clear Credit daily settlement price (clean price, 100bp fixed coupon), converted to a " +
+    "ICE Clear Credit daily settlement price (clean price on the standard fixed-coupon contract: " +
+    "100bp for the investment-grade names, 500bp for CoreWeave), converted to a " +
     "conventional spread using the official ISDA CDS Standard Model converter (built and hosted " +
     "by IHS Markit in collaboration with S&P Global) - the actual production model, not a " +
     "Heimdall approximation. 40% recovery rate assumption, standard convention for senior " +
@@ -116,7 +117,7 @@
     });
     order.forEach(function (ticker, i) {
       var t = CDS.tickers[ticker];
-      var sub = t.cleanPrice.toFixed(2) + "% clean price · matures " + t.maturityDate;
+      var sub = t.cleanPrice.toFixed(2) + "% clean price · " + Math.round(t.couponBp) + "bp coupon · matures " + t.maturityDate;
       statCard(el, ticker + " 5Y CDS", t.spreadBp.toFixed(1) + " bp", sub,
         undefined, t.asOfDate, "daily", i === 0 ? CDS_METHODOLOGY_TIP : null);
     });
@@ -125,7 +126,7 @@
   // NVDA isn't in COMPANY_COLORS (that map is capex-chart-specific and only covers the five
   // capex-reporting companies) - CDS charts cover all six hyperscalers, so extend it here rather
   // than touch the capex map's meaning.
-  var CDS_COLORS = Object.assign({}, COMPANY_COLORS, { NVDA: "#ab7d45" });
+  var CDS_COLORS = Object.assign({}, COMPANY_COLORS, { NVDA: "#ab7d45", CRWV: "#9a7fb5" });
   var CDS_CHART_RANGES = { "3M": 91, "6M": 182, "1Y": 365, "MAX": null };
 
   // A contract roll is where consecutive points of a name were settled on different maturities
@@ -187,12 +188,17 @@
       canvasId: "cdsHistoryChart", rangeToggleId: "cdsRangeToggle", csvButtonId: "cdsHistoryCsvBtn",
       csvFilename: "hyperscaler_cds_history", defaultRange: "MAX", ranges: CDS_CHART_RANGES,
       breaks: rollDates, breakLabel: "CONTRACT ROLL",
+      // Log by default: the names span more than a decade (MSFT ~50bp to CoreWeave ~900bp), and
+      // a linear axis sized for CoreWeave flattens every investment-grade line into the floor.
+      logToggleId: "cdsLogToggle", defaultLog: true,
       series: order.map(function (ticker) {
         return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: CDS.tickers[ticker].series || [] };
       }),
       yFormatter: function (v) { return Math.round(v) + "bp"; }
     });
-    buildCdsLegend("cdsLegend", order);
+    // A name only gets a line once it has two observations (a just-added name has one), so the
+    // legend lists only what is actually drawn.
+    buildCdsLegend("cdsLegend", order.filter(function (ticker) { return (CDS.tickers[ticker].series || []).length >= 2; }));
 
     // Indexed-to-100: each name normalized to its own first observation IN THE CURRENTLY
     // SELECTED WINDOW (rebasing happens inside charts.js, after range-filtering), so repricing

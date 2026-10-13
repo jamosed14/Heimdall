@@ -74,13 +74,16 @@
   <div class="stat-grid" id="group-earnings"></div>
 
   <div class="section-heading">Hyperscaler Credit <span class="calc-badge">calc</span></div>
-  <div class="section-sub">Single-name CDS conventional spread, sorted highest stress first — where the bond market is least comfortable financing the AI buildout, and where it isn't.</div>
+  <div class="section-sub">Single-name CDS conventional spread, sorted highest stress first — where the bond market is least comfortable financing the AI buildout, and where it isn't. CoreWeave (CRWV) is not a hyperscaler: it is the debt-financed neocloud renting GPU capacity to them, a high-yield credit shown alongside as the levered end of the same buildout.</div>
   <div class="stat-grid" id="group-credit"></div>
 
   <div class="chart-panel" style="margin-bottom:20px;">
     <div class="chart-header" style="margin-bottom:4px;">
       <div><div class="panel-title">CDS History</div><div class="panel-sub" id="cdsHistorySub">Basis points, daily</div></div>
-      <button class="scale-toggle" id="cdsHistoryCsvBtn">EXPORT CSV</button>
+      <div class="chart-controls">
+        <button class="scale-toggle" id="cdsLogToggle">LOG</button>
+        <button class="scale-toggle" id="cdsHistoryCsvBtn">EXPORT CSV</button>
+      </div>
     </div>
     <div class="chart-wrap compact"><canvas id="cdsHistoryChart"></canvas></div>
     <div class="mini-legend" id="cdsLegend"></div>
@@ -115,7 +118,7 @@
       <tbody id="cdsChangeBody"></tbody>
     </table>
   </div>
-  <div class="calc-note">Change columns fill in as daily history accumulates. ICE's settlement API exposes only each day's current print, so there's no historical backfill — tracking began 2026-08-20, and 1W/1M/3M/YTD read "—" until enough calendar time has actually passed for each window.</div>
+  <div class="calc-note">Change columns fill in as daily history accumulates. ICE's settlement API exposes only each day's current print, so there's no historical backfill — tracking began 2026-08-20 (CoreWeave added 2026-10-12), and 1W/1M/3M/YTD read "—" until enough calendar time has actually passed for each window.</div>
   <div class="calc-note" id="cdsRollNote"></div>
 
   <div class="section-heading">Compute</div>

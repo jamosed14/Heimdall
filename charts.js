@@ -62,7 +62,8 @@ window.HeimdallCharts = (function () {
   function create(opts) {
     // opts: {
     //   canvasId, series: [{key,label,color,dash,fill,rows:[{d,v}]}],
-    //   rangeToggleId, logToggleId (optional), defaultRange ('MAX'),
+    //   rangeToggleId, logToggleId (optional), defaultLog (bool - start on the log scale),
+    //   defaultRange ('MAX'),
     //   ranges (optional override), yFormatter(value), tooltipFormatter(label,value),
     //   zeroLine (bool) - draws a neutral reference line at y=0, useful for spreads
     //   breaks (optional) - ["YYYY-MM-DD", ...]: dates where the series stops being comparable
@@ -72,7 +73,7 @@ window.HeimdallCharts = (function () {
     // }
     var ranges = opts.ranges || DEFAULT_RANGES;
     var currentRange = opts.defaultRange || "MAX";
-    var logScale = false;
+    var logScale = !!opts.defaultLog;
     var chart = null;
     var canvas = document.getElementById(opts.canvasId);
     if (!canvas) return null;
@@ -320,6 +321,7 @@ window.HeimdallCharts = (function () {
       var logBtn = document.getElementById(opts.logToggleId);
       if (logBtn) {
         logBtn = rebind(logBtn);
+        logBtn.classList.toggle("active", logScale);
         logBtn.addEventListener("click", function () {
           logScale = !logScale;
           logBtn.classList.toggle("active", logScale);

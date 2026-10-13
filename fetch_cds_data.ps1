@@ -1,5 +1,6 @@
 # Builds a daily-accumulating single-name CDS conventional-spread history for the six AI
-# hyperscalers, from two real free sources chained together:
+# hyperscalers plus CoreWeave (the levered neocloud end of the same buildout), from two real
+# free sources chained together:
 #   1. ICE's public daily settlement price API (ICE Clear Credit / "icc-single-names") -
 #      genuinely free, no key, confirmed via direct curl (not Cloudflare-gated like the
 #      consumer-facing FINRA bond page or ICE Trade Vault ticker were).
@@ -16,8 +17,8 @@
 # (like several other Heimdall-calculated series) there's no backfill; it starts building from
 # whenever this script first runs successfully.
 #
-# Contract rolls: the tracked instrument is the on-the-run 5Y (SNRFOR / USD / XR14 / 100bp
-# coupon), whose maturity steps forward six months every March 20 and September 20. A spread on
+# Contract rolls: the tracked instrument is the on-the-run 5Y (SNRFOR / USD / XR14, at each
+# name's standard fixed coupon - see $COUPON_BP), whose maturity steps forward six months every March 20 and September 20. A spread on
 # the new contract is not comparable to the old one (longer maturity = wider, all else equal -
 # the 2026-09-21 roll from Jun-2031 to Dec-2031 stepped every name up ~7% in one day). Each
 # history point therefore carries its own contract maturity ("m"), so the front end can mark and
@@ -76,7 +77,16 @@ $NAME_MAP = @{
     "Alphabet Inc"       = "GOOGL"
     "Amazon Com Inc"     = "AMZN"
     "META PLATFORMS INC" = "META"
+    "COREWEAVE INC"      = "CRWV"
 }
+
+# Standard fixed coupon of the contract tracked for each name: 100bp for the investment-grade
+# names, 500bp for CoreWeave (high yield - the only contract ICE clears for it). The conventional
+# spread the converter returns is comparable across coupons; the clean price is not. Verified
+# before adding: CoreWeave's 2026-10-12 clean price 86.9294% at a 500bp coupon converts to
+# 898.99bp, in line with independently-reported levels (~855bp in late July 2026).
+$DEFAULT_COUPON_BP = "100"
+$COUPON_BP = @{ CRWV = "500" }
 
 Write-Output "Fetching ICE CDS settlement prices..."
 $iceRecords = $null
@@ -99,22 +109,23 @@ $sourceStatus = [ordered]@{}
 
 foreach ($name in $NAME_MAP.Keys) {
     $ticker = $NAME_MAP[$name]
+    $trackedCoupon = if ($COUPON_BP.ContainsKey($ticker)) { $COUPON_BP[$ticker] } else { $DEFAULT_COUPON_BP }
     # instrumentName e.g. "ORCLE.SNRFOR.USD.XR14.100.2031-06-20" - tier, currency, doc clause,
     # coupon (bp) and maturity are the last five dot-delimited fields. ICE can list several
     # contracts for one name (other names carry up to 10), so the tracked one is selected
-    # explicitly - senior unsecured / USD / XR14 / 100bp coupon, on-the-run 5Y maturity - never
+    # explicitly - senior unsecured / USD / XR14 / this name's standard coupon, on-the-run 5Y maturity - never
     # by whatever order ICE happens to return records in.
     $candidates = @()
     foreach ($r in $iceRecords) {
         if ($r.name -ne $name) { continue }
         $p = "$($r.instrumentName)" -split "\."
         if ($p.Count -lt 6) { continue }
-        if ($p[-5] -ne "SNRFOR" -or $p[-4] -ne "USD" -or $p[-3] -ne "XR14" -or $p[-2] -ne "100") { continue }
+        if ($p[-5] -ne "SNRFOR" -or $p[-4] -ne "USD" -or $p[-3] -ne "XR14" -or $p[-2] -ne $trackedCoupon) { continue }
         if ($p[-1] -notmatch '^\d{4}-\d{2}-\d{2}$' -or "$($r.clearingDate)" -notmatch '^\d{4}-\d{2}-\d{2}$') { continue }
         $candidates += $r
     }
     if ($candidates.Count -eq 0) {
-        Write-Host ("::warning::{0} ({1}): no SNRFOR/USD/XR14/100bp contract in today's ICE record set - skipping this run" -f $ticker, $name)
+        Write-Host ("::warning::{0} ({1}): no SNRFOR/USD/XR14/{2}bp contract in today's ICE record set - skipping this run" -f $ticker, $name, $trackedCoupon)
         $sourceStatus[$ticker] = "error"
         continue
     }
