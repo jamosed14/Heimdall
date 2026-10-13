@@ -5,6 +5,8 @@ name: BTC Fast refresh (Deribit GEX, hourly 24/7)
 # ran fine (confirmed via GitHub UI), so this was a stuck schedule trigger, not an account block
 # or a workflow bug. This edit exists to re-arm the schedule (a push to the workflow file is a
 # known, if undocumented, fix for a stalled GitHub Actions cron).
+# 2026-10-12 note: re-armed again the same way - scheduled runs had thinned from every 15-60 min
+# to every 4-7 hours per workflow starting 2026-09-13 ~17:30 UTC, with no failed or cancelled runs.
 
 # Hourly, every day, all day, all year - no DST gating needed for a plain "every hour" cadence.
 # Deribit's options chain is a live cross-sectional snapshot with genuine value in refreshing

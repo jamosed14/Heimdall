@@ -5,6 +5,8 @@ name: CDS refresh (ICE Clear Credit settlement prices - once daily, next-morning
 # ran fine (confirmed via GitHub UI), so this was a stuck schedule trigger, not an account block
 # or a workflow bug. This edit exists to re-arm the schedule (a push to the workflow file is a
 # known, if undocumented, fix for a stalled GitHub Actions cron).
+# 2026-10-12 note: re-armed again the same way - scheduled runs had thinned from every 15-60 min
+# to every 4-7 hours per workflow starting 2026-09-13 ~17:30 UTC, with no failed or cancelled runs.
 
 # Split out from Slow refresh on 2026-08-24 after the AI tab's CDS History chart stopped
 # accumulating new points past 2026-08-21. Root cause: ICE Clear Credit's public settlement-price

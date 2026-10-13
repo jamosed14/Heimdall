@@ -46,7 +46,7 @@ $existingPayload = Get-ExistingPayload $outPath
 if ($existingPayload) { Write-Output ("Existing cache found: generated {0}" -f $existingPayload.generatedAtUtc) }
 else { Write-Output "No existing cache found (first run, or previous file unreadable)." }
 
-$SEC_HEADERS = @{ "User-Agent" = "Heimdall Catallaxy (personal research dashboard) jamosed14@gmail.com" }
+$SEC_HEADERS = @{ "User-Agent" = "Heimdall Catallaxy (personal research dashboard; jamosed14@gmail.com)" }
 
 # ===================== SEC EDGAR: hyperscaler capex / revenue =====================
 

@@ -79,7 +79,7 @@ function Get-ExistingSeries($key) {
     return @()
 }
 
-$UA = @{ "User-Agent" = "Heimdall Catallaxy (personal research dashboard) jamosed14@gmail.com" }
+$UA = @{ "User-Agent" = "Heimdall Catallaxy (personal research dashboard; jamosed14@gmail.com)" }
 
 # ---------- US: FRED DGS10 (nominal), DFII10 (real/TIPS), T10YIE (breakeven) ----------
 function Get-FredSimpleSeries($seriesId) {
