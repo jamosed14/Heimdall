@@ -88,7 +88,7 @@
 
   <div class="chart-panel" style="margin-bottom:20px;">
     <div class="chart-header" style="margin-bottom:4px;">
-      <div><div class="panel-title">Relative Repricing <span class="calc-badge">calc</span></div><div class="panel-sub">Each name indexed to 100 at its first tracked observation — shows widening/tightening intensity independent of starting spread level</div></div>
+      <div><div class="panel-title">Relative Repricing <span class="calc-badge">calc</span></div><div class="panel-sub">Each name indexed to 100 at its first observation in view, and again at each contract roll — shows widening/tightening intensity independent of starting spread level</div></div>
     </div>
     <div class="chart-wrap compact"><canvas id="cdsIndexedChart"></canvas></div>
   </div>
@@ -116,6 +116,7 @@
     </table>
   </div>
   <div class="calc-note">Change columns fill in as daily history accumulates. ICE's settlement API exposes only each day's current print, so there's no historical backfill — tracking began 2026-08-20, and 1W/1M/3M/YTD read "—" until enough calendar time has actually passed for each window.</div>
+  <div class="calc-note" id="cdsRollNote"></div>
 
   <div class="section-heading">Compute</div>
   <div class="section-sub">Broad NAICS-3344 industry data — not AI-chip-specific.</div>

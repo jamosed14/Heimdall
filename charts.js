@@ -65,6 +65,10 @@ window.HeimdallCharts = (function () {
     //   rangeToggleId, logToggleId (optional), defaultRange ('MAX'),
     //   ranges (optional override), yFormatter(value), tooltipFormatter(label,value),
     //   zeroLine (bool) - draws a neutral reference line at y=0, useful for spreads
+    //   breaks (optional) - ["YYYY-MM-DD", ...]: dates where the series stops being comparable
+    //     with what came before (e.g. a CDS contract roll). Each is the first date of a new
+    //     segment: the line is broken there instead of drawn across, a dashed vertical marker
+    //     (labelled with breakLabel) is drawn, and a rebased chart re-bases at it.
     // }
     var ranges = opts.ranges || DEFAULT_RANGES;
     var currentRange = opts.defaultRange || "MAX";
@@ -103,6 +107,67 @@ window.HeimdallCharts = (function () {
 
     function yFmt(v) { return opts.yFormatter ? opts.yFormatter(v) : String(v); }
 
+    var breakXs = (opts.breaks || []).map(function (d) { return Date.parse(d + "T00:00:00Z"); })
+      .filter(isFinite).sort(function (a, b) { return a - b; });
+
+    // Index of the segment a point falls in: 0 before the first break, 1 from the first break on...
+    function segmentOf(x) {
+      var n = 0;
+      for (var i = 0; i < breakXs.length; i++) { if (x >= breakXs[i]) n = i + 1; }
+      return n;
+    }
+
+    // Splits one series' visible points at each break: a null-y point just before the first
+    // point of a new segment makes the line stop and restart rather than bridge the break, and
+    // (for rebased charts) each segment is rebased against its own first visible point.
+    function segmentPoints(pts) {
+      var out = [];
+      var seg = null;
+      var baseY = null;
+      pts.forEach(function (p) {
+        var s = segmentOf(p.x);
+        if (s !== seg) {
+          if (seg !== null) out.push({ x: p.x - 1, y: null });
+          seg = s;
+          baseY = p.y;
+        }
+        out.push({ x: p.x, y: opts.rebase ? opts.rebase(baseY, p.y) : p.y });
+      });
+      return out;
+    }
+
+    var breakMarkerPlugin = {
+      id: "heimdallBreakMarkers",
+      afterDatasetsDraw: function (c) {
+        var area = c.chartArea;
+        var xScale = c.scales.x;
+        var g = c.ctx;
+        breakXs.forEach(function (bx) {
+          if (bx <= xScale.min || bx > xScale.max) return;
+          var px = xScale.getPixelForValue(bx);
+          g.save();
+          g.strokeStyle = "#9c8f76";
+          g.lineWidth = 1;
+          g.setLineDash([4, 4]);
+          g.beginPath();
+          g.moveTo(px, area.top);
+          g.lineTo(px, area.bottom);
+          g.stroke();
+          if (opts.breakLabel) {
+            g.setLineDash([]);
+            g.fillStyle = "#9c8f76";
+            g.font = "11px 'JetBrains Mono', Consolas, monospace";
+            g.textBaseline = "top";
+            var w = g.measureText(opts.breakLabel).width;
+            var rightSide = px + 6 + w <= area.right;
+            g.textAlign = rightSide ? "left" : "right";
+            g.fillText(opts.breakLabel, rightSide ? px + 6 : px - 6, area.top + 2);
+          }
+          g.restore();
+        });
+      }
+    };
+
     function build() {
       var datasets = opts.series.map(function (s, i) {
         var pts = filterPoints(seriesPoints[i], currentRange, ranges);
@@ -111,7 +176,9 @@ window.HeimdallCharts = (function () {
         // filtering (the bug this replaces) meant switching to "1M" still carried whatever
         // cumulative offset had built up since the full history's start, so every line opened
         // hundreds of bp away from 0 instead of at it.
-        if (opts.rebase && pts.length > 0) {
+        if (breakXs.length) {
+          pts = segmentPoints(pts);
+        } else if (opts.rebase && pts.length > 0) {
           var baseY = pts[0].y;
           pts = pts.map(function (p) { return { x: p.x, y: opts.rebase(baseY, p.y) }; });
         }
@@ -127,7 +194,7 @@ window.HeimdallCharts = (function () {
           pointHoverBackgroundColor: s.color,
           fill: !!s.fill,
           tension: 0.05,
-          spanGaps: true
+          spanGaps: !breakXs.length
         };
       });
 
@@ -142,6 +209,7 @@ window.HeimdallCharts = (function () {
       var config = {
         type: "line",
         data: { datasets: datasets },
+        plugins: breakXs.length ? [breakMarkerPlugin] : [],
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -157,6 +225,8 @@ window.HeimdallCharts = (function () {
               titleFont: { size: 13 },
               bodyFont: { size: 13 },
               padding: 10,
+              // The null-y point that breaks a line (see segmentPoints) is not an observation.
+              filter: function (item) { return item.parsed.y !== null && item.parsed.y !== undefined; },
               callbacks: {
                 title: function (items) {
                   if (!items.length) return "";

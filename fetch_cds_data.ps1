@@ -15,6 +15,15 @@
 # forward - ICE's API only exposes each day's current settlement, not a historical archive, so
 # (like several other Heimdall-calculated series) there's no backfill; it starts building from
 # whenever this script first runs successfully.
+#
+# Contract rolls: the tracked instrument is the on-the-run 5Y (SNRFOR / USD / XR14 / 100bp
+# coupon), whose maturity steps forward six months every March 20 and September 20. A spread on
+# the new contract is not comparable to the old one (longer maturity = wider, all else equal -
+# the 2026-09-21 roll from Jun-2031 to Dec-2031 stepped every name up ~7% in one day). Each
+# history point therefore carries its own contract maturity ("m"), so the front end can mark and
+# break the series at a roll instead of drawing the step as credit widening. The two contracts
+# are deliberately NOT spliced into one adjusted series - every stored number stays an
+# ICE-settled, ISDA-converted print.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -32,6 +41,30 @@ function Get-ExistingSeries($ticker) {
         return , ($existingPayload.tickers.$ticker.series | ForEach-Object { [PSCustomObject]@{ Date = $_.d; Value = [double]$_.v } })
     }
     return @()
+}
+
+# date -> contract maturity for points already in the cache. Kept beside the {Date;Value}
+# working series rather than inside it because Merge-SeriesByDate only carries those two fields.
+function Get-ExistingMaturityMap($ticker) {
+    $map = @{}
+    if ($existingPayload -and $existingPayload.tickers -and $existingPayload.tickers.$ticker -and $existingPayload.tickers.$ticker.series) {
+        foreach ($p in $existingPayload.tickers.$ticker.series) {
+            if ($p.d -and $p.m) { $map[$p.d] = $p.m }
+        }
+    }
+    return $map
+}
+
+# Maturity of the on-the-run 5Y single-name contract for a given clearing date, per the standard
+# semi-annual roll: from Mar 20 the 5Y is Jun 20 five years on, from Sep 20 it is Dec 20 five
+# years on (before Mar 20 it is still the prior September's contract).
+function Get-OnTheRunMaturity([string]$clearingDate) {
+    $d = [DateTime]::ParseExact($clearingDate, "yyyy-MM-dd", [System.Globalization.CultureInfo]::InvariantCulture)
+    $mar20 = Get-Date -Year $d.Year -Month 3 -Day 20 -Hour 0 -Minute 0 -Second 0 -Millisecond 0
+    $sep20 = Get-Date -Year $d.Year -Month 9 -Day 20 -Hour 0 -Minute 0 -Second 0 -Millisecond 0
+    if ($d -ge $sep20) { return ("{0}-12-20" -f ($d.Year + 5)) }
+    if ($d -ge $mar20) { return ("{0}-06-20" -f ($d.Year + 5)) }
+    return ("{0}-12-20" -f ($d.Year + 4))
 }
 
 # ICE's own "name" strings are idiosyncratic (typos included, e.g. "Oracle Cop") - matched
@@ -66,24 +99,41 @@ $sourceStatus = [ordered]@{}
 
 foreach ($name in $NAME_MAP.Keys) {
     $ticker = $NAME_MAP[$name]
-    $rec = $iceRecords | Where-Object { $_.name -eq $name } | Select-Object -First 1
-    if (-not $rec) {
-        Write-Host ("::warning::{0} ({1}): not found in today's ICE record set - skipping this run" -f $ticker, $name)
+    # instrumentName e.g. "ORCLE.SNRFOR.USD.XR14.100.2031-06-20" - tier, currency, doc clause,
+    # coupon (bp) and maturity are the last five dot-delimited fields. ICE can list several
+    # contracts for one name (other names carry up to 10), so the tracked one is selected
+    # explicitly - senior unsecured / USD / XR14 / 100bp coupon, on-the-run 5Y maturity - never
+    # by whatever order ICE happens to return records in.
+    $candidates = @()
+    foreach ($r in $iceRecords) {
+        if ($r.name -ne $name) { continue }
+        $p = "$($r.instrumentName)" -split "\."
+        if ($p.Count -lt 6) { continue }
+        if ($p[-5] -ne "SNRFOR" -or $p[-4] -ne "USD" -or $p[-3] -ne "XR14" -or $p[-2] -ne "100") { continue }
+        if ($p[-1] -notmatch '^\d{4}-\d{2}-\d{2}$' -or "$($r.clearingDate)" -notmatch '^\d{4}-\d{2}-\d{2}$') { continue }
+        $candidates += $r
+    }
+    if ($candidates.Count -eq 0) {
+        Write-Host ("::warning::{0} ({1}): no SNRFOR/USD/XR14/100bp contract in today's ICE record set - skipping this run" -f $ticker, $name)
         $sourceStatus[$ticker] = "error"
         continue
     }
 
-    # instrumentName e.g. "ORCLE.SNRFOR.USD.XR14.100.2031-06-20" - coupon and maturity are the
-    # last two dot-delimited fields.
-    $parts = $rec.instrumentName -split "\."
-    if ($parts.Count -lt 2) {
-        Write-Host ("::warning::{0}: unparseable instrumentName '{1}' - skipping" -f $ticker, $rec.instrumentName)
-        $sourceStatus[$ticker] = "error"
-        continue
+    $rec = $null
+    $bestGapDays = $null
+    foreach ($r in $candidates) {
+        $mat = ("$($r.instrumentName)" -split "\.")[-1]
+        $expected = Get-OnTheRunMaturity $r.clearingDate
+        $gapDays = [math]::Abs(([DateTime]$mat - [DateTime]$expected).TotalDays)
+        if ($null -eq $bestGapDays -or $gapDays -lt $bestGapDays) { $rec = $r; $bestGapDays = $gapDays }
     }
+    $parts = $rec.instrumentName -split "\."
     $maturityDate = $parts[-1]
     $coupon = $parts[-2]
     $clearingDate = $rec.clearingDate
+    if ($bestGapDays -gt 0) {
+        Write-Host ("::warning::{0}: on-the-run maturity {1} not listed by ICE - tracking nearest listed contract {2}" -f $ticker, (Get-OnTheRunMaturity $clearingDate), $maturityDate)
+    }
     $eodPrice = [double]$rec.eodPrice
     if ($eodPrice -le 0 -or $eodPrice -gt 300) {
         Write-Host ("::warning::{0}: implausible eodPrice {1} - skipping" -f $ticker, $eodPrice)
@@ -134,7 +184,16 @@ foreach ($name in $NAME_MAP.Keys) {
     # @(...) forces array typing even when there's exactly one point - PowerShell otherwise
     # unwraps a single-item pipeline result to a bare scalar/hashtable, which would then
     # serialize as {d,v} instead of [{d,v}] and break every front-end consumer expecting an array.
-    $series = @($seriesResult.series | ForEach-Object { @{ d = $_.Date; v = [math]::Round($_.Value, 2) } })
+    # Each point keeps the maturity of the contract it was settled on: today's point gets today's
+    # contract, older points keep whatever they were stored with. A point with no recorded
+    # maturity stays untagged (unknown) rather than being assumed to match today's contract.
+    $maturityByDate = Get-ExistingMaturityMap $ticker
+    if ($seriesResult.status -eq "ok") { $maturityByDate[$clearingDate] = $maturityDate }
+    $series = @($seriesResult.series | ForEach-Object {
+        $pt = [ordered]@{ d = $_.Date; v = [math]::Round($_.Value, 2) }
+        if ($maturityByDate.ContainsKey($_.Date)) { $pt.m = $maturityByDate[$_.Date] }
+        $pt
+    })
     $tickersOut[$ticker] = @{
         name          = $rec.name
         maturityDate  = $maturityDate

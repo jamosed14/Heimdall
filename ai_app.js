@@ -128,6 +128,28 @@
   var CDS_COLORS = Object.assign({}, COMPANY_COLORS, { NVDA: "#ab7d45" });
   var CDS_CHART_RANGES = { "3M": 91, "6M": 182, "1Y": 365, "MAX": null };
 
+  // A contract roll is where consecutive points of a name were settled on different maturities
+  // (each point carries its own, "m"). Spreads either side of one aren't comparable - the longer
+  // contract is wider all else equal - so charts break there and change windows that span one
+  // are withheld. Points with no recorded maturity never create a roll on their own.
+  function cdsRolls(CDS) {
+    var byDate = {};
+    Object.keys(CDS.tickers).forEach(function (ticker) {
+      var rows = (CDS.tickers[ticker].series || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+      for (var i = 1; i < rows.length; i++) {
+        if (rows[i].m && rows[i - 1].m && rows[i].m !== rows[i - 1].m) {
+          byDate[rows[i].d] = { d: rows[i].d, from: rows[i - 1].m, to: rows[i].m };
+        }
+      }
+    });
+    return Object.keys(byDate).sort().map(function (d) { return byDate[d]; });
+  }
+
+  function fmtContract(m) {
+    var dt = new Date(m + "T00:00:00Z");
+    return dt.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  }
+
   function cdsOrder(CDS) {
     return Object.keys(CDS.tickers).sort(function (a, b) {
       return CDS.tickers[b].spreadBp - CDS.tickers[a].spreadBp;
@@ -146,6 +168,7 @@
     var CDS = window.CDS_DATA;
     if (!CDS || !CDS.tickers) return;
     var order = cdsOrder(CDS);
+    var rollDates = cdsRolls(CDS).map(function (r) { return r.d; });
 
     var earliestDate = null;
     order.forEach(function (ticker) {
@@ -163,6 +186,7 @@
     window.HeimdallCharts.create({
       canvasId: "cdsHistoryChart", rangeToggleId: "cdsRangeToggle", csvButtonId: "cdsHistoryCsvBtn",
       csvFilename: "hyperscaler_cds_history", defaultRange: "MAX", ranges: CDS_CHART_RANGES,
+      breaks: rollDates, breakLabel: "CONTRACT ROLL",
       series: order.map(function (ticker) {
         return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: CDS.tickers[ticker].series || [] };
       }),
@@ -174,9 +198,11 @@
     // SELECTED WINDOW (rebasing happens inside charts.js, after range-filtering), so repricing
     // intensity is comparable across names regardless of starting spread level (e.g. MSFT at
     // 46bp widening 20% should read the same visual intensity as ORCL at 212bp widening 20%) -
-    // and switching to "1M" shows that month's own repricing, not the whole history's.
+    // and switching to "1M" shows that month's own repricing, not the whole history's. It also
+    // re-bases to 100 at each contract roll, so the roll's maturity step never reads as repricing.
     window.HeimdallCharts.create({
       canvasId: "cdsIndexedChart", rangeToggleId: "cdsRangeToggle", defaultRange: "MAX", ranges: CDS_CHART_RANGES,
+      breaks: rollDates, breakLabel: "CONTRACT ROLL · RE-BASED",
       rebase: function (baseY, y) { return (y / baseY) * 100; },
       series: order.map(function (ticker) {
         return { key: ticker, label: ticker, color: CDS_COLORS[ticker] || "#9c8f76", width: ticker === "ORCL" ? 3 : 2, rows: CDS.tickers[ticker].series || [] };
@@ -188,18 +214,27 @@
   // Basis-point change from the latest observation to the nearest prior observation at least
   // `days` back. Returns null (not zero) when history doesn't reach back that far yet - a
   // missing window is not a flat window.
-  function bpChangeAt(seriesAsc, days) {
+  // Either lookup can instead return { roll: <roll> } when the window's baseline sits on the far
+  // side of a contract roll: the difference would mix two contracts, so it's withheld.
+  function changeFrom(base, latest, rolls) {
+    for (var i = rolls.length - 1; i >= 0; i--) {
+      if (rolls[i].d > base.d && rolls[i].d <= latest.d) return { roll: rolls[i] };
+    }
+    return latest.v - base.v;
+  }
+
+  function bpChangeAt(seriesAsc, days, rolls) {
     if (!seriesAsc || seriesAsc.length < 2) return null;
     var latest = seriesAsc[seriesAsc.length - 1];
     var targetMs = Date.parse(latest.d + "T00:00:00Z") - days * 86400000;
     for (var i = seriesAsc.length - 1; i >= 0; i--) {
       var ms = Date.parse(seriesAsc[i].d + "T00:00:00Z");
-      if (ms <= targetMs) return latest.v - seriesAsc[i].v;
+      if (ms <= targetMs) return changeFrom(seriesAsc[i], latest, rolls);
     }
     return null;
   }
 
-  function ytdChangeBp(seriesAsc) {
+  function ytdChangeBp(seriesAsc, rolls) {
     if (!seriesAsc || seriesAsc.length < 2) return null;
     var latest = seriesAsc[seriesAsc.length - 1];
     var jan1 = latest.d.slice(0, 4) + "-01-01";
@@ -207,7 +242,7 @@
     // real YTD baseline, only a partial-year one that would misleadingly look like a full YTD.
     if (seriesAsc[0].d > jan1) return null;
     for (var i = 0; i < seriesAsc.length; i++) {
-      if (seriesAsc[i].d >= jan1) return latest.v - seriesAsc[i].v;
+      if (seriesAsc[i].d >= jan1) return changeFrom(seriesAsc[i], latest, rolls);
     }
     return null;
   }
@@ -233,6 +268,17 @@
       if (bp === null || bp === undefined) return "—";
       return (bp > 0 ? "+" : "") + bp.toFixed(1) + "bp";
     }
+    var rolls = cdsRolls(CDS);
+    var withheldRoll = null;
+    function changeCell(chg) {
+      if (chg && chg.roll) {
+        withheldRoll = chg.roll;
+        var tip = "Window spans the " + chg.roll.d + " contract roll (" + fmtContract(chg.roll.from) + " to " +
+          fmtContract(chg.roll.to) + " maturity) - the two contracts aren't comparable, so no change is shown.";
+        return '<td title="' + tip + '">— <span class="tag-note">roll</span></td>';
+      }
+      return '<td class="' + chgClass(chg) + '"' + cdsChangeCellStyle(chg) + ">" + fmtChg(chg) + "</td>";
+    }
     function chgClass(bp) {
       if (bp === null || bp === undefined) return "";
       return bp > 0 ? "negative" : bp < 0 ? "positive" : "";
@@ -241,19 +287,23 @@
     tbody.innerHTML = cdsOrder(CDS).map(function (ticker) {
       var t = CDS.tickers[ticker];
       var seriesAsc = (t.series || []).slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; });
-      var w1 = bpChangeAt(seriesAsc, 7);
-      var m1 = bpChangeAt(seriesAsc, 30);
-      var m3 = bpChangeAt(seriesAsc, 91);
-      var ytd = ytdChangeBp(seriesAsc);
       return "<tr>" +
         "<td>" + ticker + "</td>" +
         "<td>" + t.spreadBp.toFixed(1) + "bp</td>" +
-        '<td class="' + chgClass(w1) + '"' + cdsChangeCellStyle(w1) + ">" + fmtChg(w1) + "</td>" +
-        '<td class="' + chgClass(m1) + '"' + cdsChangeCellStyle(m1) + ">" + fmtChg(m1) + "</td>" +
-        '<td class="' + chgClass(m3) + '"' + cdsChangeCellStyle(m3) + ">" + fmtChg(m3) + "</td>" +
-        '<td class="' + chgClass(ytd) + '"' + cdsChangeCellStyle(ytd) + ">" + fmtChg(ytd) + "</td>" +
+        changeCell(bpChangeAt(seriesAsc, 7, rolls)) +
+        changeCell(bpChangeAt(seriesAsc, 30, rolls)) +
+        changeCell(bpChangeAt(seriesAsc, 91, rolls)) +
+        changeCell(ytdChangeBp(seriesAsc, rolls)) +
         "</tr>";
     }).join("");
+
+    var rollNote = document.getElementById("cdsRollNote");
+    if (rollNote) {
+      rollNote.textContent = withheldRoll
+        ? '"— roll" marks a window that spans the ' + withheldRoll.d + " contract roll, when the tracked 5Y moved from the " +
+          fmtContract(withheldRoll.from) + " to the " + fmtContract(withheldRoll.to) + " maturity. A longer contract settles wider all else equal, so a change across the roll would mix a maturity step with real repricing. The figure returns once the window sits entirely on the current contract."
+        : "";
+    }
   }
 
   // ---------- RECENT EARNINGS (all six - five capex-tracked hyperscalers + NVDA) ----------
