@@ -1,5 +1,6 @@
 # Builds a daily-accumulating single-name CDS conventional-spread history for the six AI
-# hyperscalers plus CoreWeave (the levered neocloud end of the same buildout), from two real
+# hyperscalers plus CoreWeave (the levered neocloud end of the same buildout) and Broadcom (the
+# custom-accelerator and networking supplier to it), from two real
 # free sources chained together:
 #   1. ICE's public daily settlement price API (ICE Clear Credit / "icc-single-names") -
 #      genuinely free, no key, confirmed via direct curl (not Cloudflare-gated like the
@@ -78,6 +79,7 @@ $NAME_MAP = @{
     "Amazon Com Inc"     = "AMZN"
     "META PLATFORMS INC" = "META"
     "COREWEAVE INC"      = "CRWV"
+    "BROADCOM INC"       = "AVGO"
 }
 
 # Standard fixed coupon of the contract tracked for each name: 100bp for the investment-grade

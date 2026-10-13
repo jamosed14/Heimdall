@@ -126,7 +126,7 @@
   // NVDA isn't in COMPANY_COLORS (that map is capex-chart-specific and only covers the five
   // capex-reporting companies) - CDS charts cover all six hyperscalers, so extend it here rather
   // than touch the capex map's meaning.
-  var CDS_COLORS = Object.assign({}, COMPANY_COLORS, { NVDA: "#ab7d45", CRWV: "#9a7fb5" });
+  var CDS_COLORS = Object.assign({}, COMPANY_COLORS, { NVDA: "#ab7d45", CRWV: "#9a7fb5", AVGO: "#5fa8a0" });
   var CDS_CHART_RANGES = { "3M": 91, "6M": 182, "1Y": 365, "MAX": null };
 
   // A contract roll is where consecutive points of a name were settled on different maturities
