@@ -88,6 +88,27 @@
     </div>
   </div>
 
+  <div class="section-heading">Network Hashrate</div>
+  <div class="section-sub">Estimated from block arrival times (mempool.space), so single days are noisy — shown as a trailing 7-day average. Difficulty adjustments are the exact on-chain values.</div>
+  <div class="stat-grid" id="group-hashrate"></div>
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div><div class="hero-label">Hashrate · 7D Average (EH/s)</div></div>
+      <div class="chart-controls">
+        <div class="range-toggle" id="hashRangeToggle">
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y">3Y</button>
+          <button data-range="5Y">5Y</button>
+          <button data-range="MAX">MAX</button>
+        </div>
+        <button class="scale-toggle" id="hashLogToggle">LOG</button>
+        <button class="scale-toggle" id="hashCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="hashChart"></canvas></div>
+  </div>
+  <div class="footer-note" id="hashGeneratedNote"></div>
+
   <div class="section-heading">Dealer Gamma Exposure <span class="calc-badge">calc</span></div>
   <div class="section-sub">Estimated from Deribit's public BTC options open interest, not observed dealer positioning — see tooltip for methodology.</div>
 
@@ -139,6 +160,8 @@
 <script src="data/btc_data.js"></script>
 <script src="data/gex_data.js"></script>
 <script src="app.js"></script>
+<script src="data/hashrate_data.js"></script>
+<script src="btc_hashrate_app.js"></script>
 <script src="ticker.js"></script>
 </body>
 </html>

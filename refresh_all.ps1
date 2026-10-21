@@ -21,3 +21,9 @@ Write-Output "---"
 
 Write-Output "---"
 & (Join-Path $root "fetch_token_pricing.ps1")
+
+Write-Output "---"
+& (Join-Path $root "fetch_hashrate_data.ps1")
+
+Write-Output "---"
+& (Join-Path $root "fetch_ai_usage.ps1")

@@ -1,0 +1,1 @@
+﻿window.AI_USAGE_DATA = {"generatedAtUtc":"2026-10-21T15:33:23Z","lastSuccessfulRefresh":"2026-10-21T15:33:23Z","sourceStatus":{"openrouterRankings":"ok"},"latest":{"week":"2026-10-20","openSharePct":80.1,"openSharePrevPct":82.6,"wowChangePts":-2.4,"paidTokensT":113.8,"rowsUsed":20,"unmatched":1},"series":{"openSharePct":[{"d":"2026-10-20","v":80.1}]}};

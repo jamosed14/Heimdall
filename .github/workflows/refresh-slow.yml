@@ -36,6 +36,9 @@ name: Slow refresh (BTC canonical close, Credit, Energy, AI - once daily)
 #   - fetch_token_pricing.ps1 (OpenRouter list prices + Artificial Analysis index, added
 #     2026-10-21 for the AI tab's Inference Pricing section): no upstream price history, so
 #     the series is built from one snapshot per UTC day - daily is exactly the intended cadence.
+#   - fetch_hashrate_data.ps1 (mempool.space daily hashrate + difficulty adjustments, added
+#     2026-10-21 for the BTC tab's Network Hashrate section): daily estimates, and difficulty
+#     only changes every ~2 weeks - no benefit from polling more often.
 #
 # fetch_cds_data.ps1 (ICE Clear Credit settlement prices) used to run here too, but was moved to
 # its own refresh-cds.yml on 2026-08-24: ICE publishes settlements per-name on a rolling basis
@@ -79,7 +82,7 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
         run: |
-          $scripts = @("fetch_btc_data.ps1", "fetch_credit_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1", "fetch_global_rates_data.ps1", "fetch_token_pricing.ps1")
+          $scripts = @("fetch_btc_data.ps1", "fetch_credit_data.ps1", "fetch_energy_data.ps1", "fetch_ai_data.ps1", "fetch_global_rates_data.ps1", "fetch_token_pricing.ps1", "fetch_hashrate_data.ps1", "fetch_ai_usage.ps1")
           $failed = @()
           foreach ($script in $scripts) {
             Write-Host "::group::Running $script"
