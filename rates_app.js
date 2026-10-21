@@ -125,7 +125,7 @@
       rangeToggleId: "rangeToggle",
       csvButtonId: "yieldHistCsvBtn",
       csvFilename: "treasury_yields_2y_10y_30y",
-      defaultRange: "5Y",
+      defaultRange: "MAX",
       series: [
         { key: "y10", label: "10Y", color: "#f7931a", rows: DATA.series.y10 },
         { key: "y2", label: "2Y", color: "#a89a7c", dash: [3, 4], rows: DATA.series.y2 },

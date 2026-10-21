@@ -306,6 +306,11 @@ window.HeimdallCharts = (function () {
       var rangeEl = document.getElementById(opts.rangeToggleId);
       if (rangeEl) {
         rangeEl = rebind(rangeEl);
+        // Highlight whatever range is actually drawn - the HTML hardcodes class="active" on
+        // MAX, which was wrong (and misleading) for any chart whose defaultRange isn't MAX.
+        rangeEl.querySelectorAll("button").forEach(function (b) {
+          b.classList.toggle("active", b.dataset.range === currentRange);
+        });
         rangeEl.addEventListener("click", function (e) {
           var btn = e.target.closest("button");
           if (!btn) return;
