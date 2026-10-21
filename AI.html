@@ -146,6 +146,37 @@
     <button data-range="MAX" class="active">MAX</button>
   </div>
 
+  <div class="section-heading">Inference Pricing <span class="calc-badge">calc</span></div>
+  <div class="section-sub">What a given level of model capability costs, and how fast that's falling. Capability = Artificial Analysis Intelligence Index; price = OpenRouter list price, blended 3:1 input:output, $ per 1M tokens. Floors are the cheapest model scoring at least 90% / 75% of the current frontier model's score.</div>
+  <div class="stat-grid" id="group-tokens"></div>
+  <div class="chart-panel" style="margin-bottom:20px;">
+    <div class="chart-header" style="margin-bottom:4px;">
+      <div><div class="panel-title">Price of Capability</div><div class="panel-sub" id="tokenPriceSub">$ per 1M tokens (3:1 blend), daily</div></div>
+      <div class="chart-controls">
+        <button class="scale-toggle" id="tokenLogToggle">LOG</button>
+        <button class="scale-toggle" id="tokenPriceCsvBtn">EXPORT CSV</button>
+      </div>
+    </div>
+    <div class="chart-wrap compact"><canvas id="tokenPriceChart"></canvas></div>
+    <div class="mini-legend" id="tokenLegend"></div>
+  </div>
+  <div class="breakdown-table-wrap">
+    <table class="breakdown-table">
+      <thead>
+        <tr>
+          <th>Top models by index</th>
+          <th>Index</th>
+          <th>Blended</th>
+          <th>Input</th>
+          <th>Output</th>
+          <th>Weights</th>
+        </tr>
+      </thead>
+      <tbody id="tokenTopBody"></tbody>
+    </table>
+  </div>
+  <div class="calc-note" id="tokenCalcNote"></div>
+
   <div class="section-heading">Power</div>
   <div class="section-sub">Total U.S. electricity demand — a macro/grid proxy, not a measurement of AI/data-center electricity use specifically.</div>
   <div class="stat-grid" id="group-power"></div>
@@ -223,6 +254,8 @@
 <script src="data/ai_manual.js"></script>
 <script src="data/cds_data.js"></script>
 <script src="ai_app.js"></script>
+<script src="data/token_pricing_data.js"></script>
+<script src="ai_tokens_app.js"></script>
 <script src="ticker.js"></script>
 </body>
 </html>

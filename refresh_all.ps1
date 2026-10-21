@@ -18,3 +18,6 @@ Write-Output "---"
 & (Join-Path $root "fetch_equities_data.ps1")
 Write-Output "---"
 & (Join-Path $root "fetch_cds_data.ps1")
+
+Write-Output "---"
+& (Join-Path $root "fetch_token_pricing.ps1")
