@@ -137,8 +137,11 @@
 
   // ---------- GLOBAL SOVEREIGN 10Y ----------
   var GLOBAL = window.GLOBAL_RATES_DATA;
-  var GLOBAL_ORDER = ["US", "JP", "DE", "GB", "CA", "AU"];
-  var GLOBAL_COLORS = { US: "#f7931a", JP: "#c0574a", DE: "#7f97ab", GB: "#7fae55", CA: "#a89a7c", AU: "#ab7d45" };
+  var GLOBAL_ORDER = ["US", "JP", "DE", "FR", "IT", "ES", "GB", "CA", "AU"];
+  // Cumulative-change chart stays on the original six to keep it readable; FR/IT/ES are
+  // cards-only (their history is still in GLOBAL_RATES_DATA.series for later use).
+  var GLOBAL_CHART_ORDER = ["US", "JP", "DE", "GB", "CA", "AU"];
+  var GLOBAL_COLORS = { US: "#f7931a", JP: "#c0574a", DE: "#7f97ab", FR: "#5d78b0", IT: "#4e9a8c", ES: "#c9a23f", GB: "#7fae55", CA: "#a89a7c", AU: "#ab7d45" };
 
   // Two-letter country code -> flag emoji via Unicode regional indicator symbols (no image
   // assets needed - same technique used for currency/country badges elsewhere on the web).
@@ -165,6 +168,12 @@
       var r = c.real10y, b = c.breakeven10y;
       return '<div class="stat-subline">real ' + fmtPct(r.value) + " (" + fmtBpChg1m(r) + " 1M) · breakeven " +
         fmtPct(b.value) + " (" + fmtBpChg1m(b) + " 1M)</div>";
+    }
+    // FR/IT/ES: spread over the Bund benchmark (same CNBC feed on both legs). value is already bp.
+    if (c.spreadVsBund && c.spreadVsBund.value !== null && c.spreadVsBund.value !== undefined) {
+      var s = c.spreadVsBund;
+      var bp = Math.round(s.value);
+      return '<div class="stat-subline">vs Bund ' + (bp > 0 ? "+" : "") + bp + "bp (" + fmtBpChg1m(s) + " 1M)</div>";
     }
     if (c.realLongTerm) {
       return '<div class="stat-subline">RRB real yield (long-term, not 10Y-matched): ' + fmtPct(c.realLongTerm.value) +
@@ -207,7 +216,7 @@
   function buildGlobalRatesLegend() {
     var el = document.getElementById("globalRatesLegend");
     if (!el) return;
-    el.innerHTML = GLOBAL_ORDER.map(function (cc) {
+    el.innerHTML = GLOBAL_CHART_ORDER.map(function (cc) {
       var name = (GLOBAL.countries[cc] && GLOBAL.countries[cc].name) || cc;
       return '<span class="legend-item"><span class="legend-dot" style="background:' + GLOBAL_COLORS[cc] + '"></span>' + flagEmoji(cc) + " " + name + "</span>";
     }).join("");
@@ -228,7 +237,7 @@
       csvFilename: "global_sovereign_10y_cumulative_change", defaultRange: "1Y",
       ranges: { "1M": 30, "3M": 91, "1Y": 365, "MAX": null },
       rebase: function (baseY, y) { return (y - baseY) * 100; },
-      series: GLOBAL_ORDER.map(function (cc) {
+      series: GLOBAL_CHART_ORDER.map(function (cc) {
         return { key: cc, label: cc, color: GLOBAL_COLORS[cc] || "#9c8f76", width: cc === "US" ? 3 : 2, rows: GLOBAL.series[cc] || [] };
       }),
       yFormatter: function (v) { return (v > 0 ? "+" : "") + Math.round(v) + "bp"; }

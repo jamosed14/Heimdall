@@ -39,6 +39,9 @@
 #   Canada:    Bank of Canada Valet API, series BD.CDN.10YR.DQ.YLD - clean documented REST API.
 #   Australia: RBA statistical table F2 (capital market yields) - daily CSV, real history to 2013.
 #              Also carries an "Indexed Bond" column at the same 10Y tenor, same file/date.
+#   France/Italy/Spain: CNBC chart API (Refinitiv benchmark 10Y) - a secondary aggregator, used
+#              because no free official daily per-country source exists (see Get-CnbcDailySeries).
+#              Each also gets a spread vs the Bund from the same CNBC feed.
 #
 # Real yield / breakeven decomposition (DeltaNominal = DeltaReal + DeltaBreakeven), where a
 # genuinely matched-tenor real yield exists: US (FRED DFII10 real + T10YIE breakeven, both
@@ -313,11 +316,54 @@ function Get-AustraliaCsvColumn([int]$colIndex) {
 function Get-AustraliaSeries() { return Get-AustraliaCsvColumn 4 }
 function Get-AustraliaRealSeries() { return Get-AustraliaCsvColumn 5 }
 
+# ---------- Euro area ex-Germany: CNBC chart history (Refinitiv benchmark 10Y, e.g. IT10YT=RR) ----------
+# No free official DAILY source exists for France/Italy/Spain 10Y: the ECB's per-country series
+# (IRS dataset, "long-term interest rate for convergence purposes") is monthly averages only,
+# the ECB's daily YC curves cover the euro-area aggregate only, Banque de France Webstat needs a
+# registered key, and Stooq now sits behind a JS proof-of-work wall. CNBC's chart endpoint is a
+# secondary aggregator - one rung below the central-bank sources above - but it carries the
+# Refinitiv benchmark-bond yield daily. The "bars" endpoint takes an explicit date range and
+# returns daily closes back to 2000 in one call (the "charts/<range>.json" endpoint only gives
+# daily bars on its 1Y range; longer ranges are weekly/quarterly). No key needed.
+# Known gaps in CNBC's own history: roughly Jan-Mar 2014 and mid-Sep to Dec 2014 are missing for
+# all four symbols. Left as gaps - never interpolated.
+# CNBC stamps an extra bar on Saturdays (a weekend quote, not a session close) - euro govvies
+# don't trade weekends, so Sat/Sun bars are dropped rather than treated as observations.
+# $namePattern guards against CNBC silently serving a different instrument: barData.symbol is
+# an internal numeric issue id, so the check is on companyName (e.g. "Italy 10 Year Bond").
+function Get-CnbcDailySeries($symbol, $namePattern) {
+    try {
+        $end = (Get-Date).ToUniversalTime().AddDays(1).ToString("yyyyMMdd")
+        $uri = "https://ts-api.cnbc.com/harmony/app/bars/{0}/1D/20000101000000/{1}000000/adjusted/EST5EDT.json" -f $symbol, $end
+        $resp = Invoke-RestMethod -Uri $uri -Headers $UA -TimeoutSec 60
+        $name = [string]$resp.barData.companyName
+        if ($name -notmatch $namePattern -or $name -notmatch "10 Year") { throw ("unexpected instrument for {0}: '{1}'" -f $symbol, $name) }
+        $inv = [System.Globalization.CultureInfo]::InvariantCulture
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($b in $resp.barData.priceBars) {
+            $t = [string]$b.tradeTime
+            if ($t.Length -lt 8) { continue }
+            $date = [DateTime]::ParseExact($t.Substring(0, 8), "yyyyMMdd", $inv)
+            if ($date.DayOfWeek -eq [DayOfWeek]::Saturday -or $date.DayOfWeek -eq [DayOfWeek]::Sunday) { continue }
+            $v = 0.0
+            if (-not [double]::TryParse([string]$b.close, [System.Globalization.NumberStyles]::Float, $inv, [ref]$v)) { continue }
+            $out.Add([PSCustomObject]@{ Date = $date.ToString("yyyy-MM-dd"); Value = $v })
+        }
+        return , ($out | Sort-Object Date)
+    } catch {
+        Write-Host ("::error::CNBC {0} fetch failed: {1}" -f $symbol, $_.Exception.Message)
+        return @()
+    }
+}
+
 # ---------- Fetch + validate + merge, one country at a time (source isolation) ----------
 $COUNTRIES = [ordered]@{
     US = @{ Name = "United States"; Flag = "us"; MinCount = 1000; Fetch = { Get-UsSeries } }
     JP = @{ Name = "Japan";         Flag = "jp"; MinCount = 500;  Fetch = { Get-JapanSeries } }
     DE = @{ Name = "Germany";       Flag = "de"; MinCount = 500;  Fetch = { Get-GermanySeries } }
+    FR = @{ Name = "France";        Flag = "fr"; MinCount = 4000; Fetch = { Get-CnbcDailySeries "FR10Y-FR" "France" } }
+    IT = @{ Name = "Italy";         Flag = "it"; MinCount = 4000; Fetch = { Get-CnbcDailySeries "IT10Y-IT" "Ital" } }
+    ES = @{ Name = "Spain";         Flag = "es"; MinCount = 4000; Fetch = { Get-CnbcDailySeries "ES10Y-ES" "Spa" } }
     GB = @{ Name = "United Kingdom"; Flag = "gb"; MinCount = 30;  Fetch = { Get-UkSeries } }
     CA = @{ Name = "Canada";        Flag = "ca"; MinCount = 500;  Fetch = { Get-CanadaSeries } }
     AU = @{ Name = "Australia";     Flag = "au"; MinCount = 500;  Fetch = { Get-AustraliaSeries } }
@@ -358,6 +404,11 @@ $SUPPLEMENTARY = [ordered]@{
     GB_BE   = @{ MinCount = 1;   Fetch = { Get-UkBreakevenSeries } }
     AU_REAL = @{ MinCount = 500; Fetch = { Get-AustraliaRealSeries } }
     CA_RRB  = @{ MinCount = 500; Fetch = { Get-CanadaRrbSeries } }
+    # Bund 10Y from the SAME CNBC/Refinitiv feed as FR/IT/ES - used only as the base for their
+    # spread-vs-Bund. The DE card itself stays on the Bundesbank series; that one is a fitted
+    # curve point (residual 10Y maturity), not the benchmark bond, so subtracting it from a
+    # benchmark-bond yield would mix methodologies inside the spread.
+    DE_CNBC = @{ MinCount = 4000; Fetch = { Get-CnbcDailySeries "DE10Y-DE" "German" } }
 }
 foreach ($k in $SUPPLEMENTARY.Keys) {
     $meta = $SUPPLEMENTARY[$k]
@@ -382,6 +433,19 @@ foreach ($p in $raw["AU_REAL"]) {
     if ($auNominalMap.ContainsKey($p.Date)) { $auBreakeven.Add([PSCustomObject]@{ Date = $p.Date; Value = $auNominalMap[$p.Date] - $p.Value }) }
 }
 $raw["AU_BE"] = ($auBreakeven | Sort-Object Date)
+
+# Spread vs Bund for the CNBC-sourced euro countries: only on dates where both legs have a
+# close (same vendor, same benchmark-bond methodology) - no forward-filling across gaps.
+$bundMap = @{}
+foreach ($p in $raw["DE_CNBC"]) { $bundMap[$p.Date] = $p.Value }
+$SPREAD_VS_BUND = @("FR", "IT", "ES")
+foreach ($cc in $SPREAD_VS_BUND) {
+    $spread = New-Object System.Collections.Generic.List[object]
+    foreach ($p in $raw[$cc]) {
+        if ($bundMap.ContainsKey($p.Date)) { $spread.Add([PSCustomObject]@{ Date = $p.Date; Value = $p.Value - $bundMap[$p.Date] }) }
+    }
+    $raw[$cc + "_SPREAD"] = ($spread | Sort-Object Date)
+}
 
 $CRITICAL = @("US")
 $missingCritical = $CRITICAL | Where-Object { $raw[$_].Count -eq 0 }
@@ -443,6 +507,13 @@ foreach ($cc in $COUNTRIES.Keys) {
         # Canada only: a long-term (not 10Y) Real Return Bond yield, kept structurally distinct
         # from real10y so the front end can never accidentally present it as tenor-matched.
         realLongTerm  = if ($cc -eq "CA") { Get-DecompStat "CA_RRB" } else { $null }
+        # FR/IT/ES only: 10Y spread over the CNBC Bund benchmark. value is in bp (unlike the
+        # yields, which stay in %); chg* are bp like everywhere else.
+        spreadVsBund  = if ($SPREAD_VS_BUND -contains $cc) {
+            $s = Get-DecompStat ($cc + "_SPREAD")
+            if ($s) { $s.value = [math]::Round($s.value * 100.0, 1) }
+            $s
+        } else { $null }
     }
     $seriesOut[$cc] = To-SeriesJson $raw[$cc]
 }

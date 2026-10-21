@@ -40,7 +40,19 @@ try {
         if ($chunkEnd -gt $endDate) { $chunkEnd = $endDate }
         $uri = "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start={0}&end={1}" -f `
             $cursor.ToString("yyyy-MM-dd"), $chunkEnd.ToString("yyyy-MM-dd")
-        $rows = Invoke-RestMethod -Uri $uri -Headers @{ "User-Agent" = "Heimdall Catallaxy (jamosed14@gmail.com)" } -TimeoutSec 30
+        # ~13 paginated requests per run: retry each one so a single transient blip (DNS hiccup,
+        # timeout, 429) doesn't throw away the whole fetch and force a stale fallback.
+        $rows = $null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $rows = Invoke-RestMethod -Uri $uri -Headers @{ "User-Agent" = "Heimdall Catallaxy (jamosed14@gmail.com)" } -TimeoutSec 30
+                break
+            } catch {
+                if ($attempt -eq 3) { throw }
+                Write-Host ("::warning::Coinbase request failed (attempt {0}/3), retrying: {1}" -f $attempt, $_.Exception.Message)
+                Start-Sleep -Seconds (2 * $attempt)
+            }
+        }
         foreach ($row in $rows) {
             # row = [ time, low, high, open, close, volume ]
             $d = [DateTimeOffset]::FromUnixTimeSeconds([int64]$row[0]).UtcDateTime.Date
@@ -238,9 +250,15 @@ $statsVol90 = $null
 if ($null -ne $vol90) { $statsVol90 = [math]::Round($vol90, 2) }
 
 $nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+# Only advance lastSuccessfulRefresh when the price series actually refreshed; on a stale
+# fallback keep the previous timestamp so the metadata doesn't claim a refresh that didn't happen.
+$lastRefresh = $nowUtc
+if ($priceResult.status -ne "ok" -and $existingPayload -and $existingPayload.lastSuccessfulRefresh) {
+    $lastRefresh = $existingPayload.lastSuccessfulRefresh
+}
 $payload = @{
     generatedAtUtc        = $nowUtc
-    lastSuccessfulRefresh = $nowUtc
+    lastSuccessfulRefresh = $lastRefresh
     lastObservation       = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
     sourceStatus          = @{ coinbase = $priceResult.status; cmeBasis = $cmeBasisStatus }
     asOfDate              = $daily[$daily.Count - 1].Date.ToString("yyyy-MM-dd")
@@ -260,4 +278,4 @@ $payload = @{
 
 Write-DataFileAtomic -Path $outPath -VarName "BTC_DATA" -Payload $payload -Depth 6
 Write-Output ("Price: {0}  200W MA: {1}  Premium: {2}%  ATH: {3} ({4})  Drawdown: {5}%  Vol30D: {6}%  Vol90D: {7}%" -f `
-    $currentPrice, $statsMA, $statsPremium, $athPrice, $payload.stats.athDate, $drawdownPct, $statsVol30, $statsVol90)
+    $currentPrice, $statsMA, $statsPremium, $athPrice, $payload.stats.athDate, $payload.stats.drawdownPct, $statsVol30, $statsVol90)
