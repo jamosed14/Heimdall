@@ -39,7 +39,7 @@ $existing = Get-ExistingPayload $outPath
 if ($existing) { Write-Output ("Existing cache found: generated {0}" -f $existing.generatedAtUtc) }
 else { Write-Output "No existing cache found (first run, or previous file unreadable)." }
 
-$SERIES_KEYS = @("frontierPrice", "floor90Price", "floor75Price", "bestOpenPrice", "frontierIndex", "bestOpenIndex")
+$SERIES_KEYS = @("frontierPrice", "floor90Price", "floor75Price", "bestOpenPrice", "frontierIndex", "bestOpenIndex", "openLagMonths")
 $TOP_N = 12
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
 
@@ -127,7 +127,20 @@ if ($models) {
     $floor90 = Get-Floor 0.90 $frontier.index
     $floor75 = Get-Floor 0.75 $frontier.index
     $openPick = Get-Pick $bestOpen
-    if ($openPick) { $openPick.gapPts = [math]::Round($frontier.index - $bestOpen.index, 1) }
+    if ($openPick) {
+        $openPick.gapPts = [math]::Round($frontier.index - $bestOpen.index, 1)
+        # Open lag: how long after a closed model first reached the best open model's score did
+        # that open model ship. Uses OpenRouter release dates of models still listed - old
+        # closed models (GPT-4, 2023) are still listed, but a delisted closed model that got
+        # there earlier would make this read short. Negative = open reached it first.
+        $firstClosed = $models | Where-Object { -not $_.open -and $_.index -ge $bestOpen.index } | Sort-Object created | Select-Object -First 1
+        if ($firstClosed) {
+            $lagDays = ([DateTime]::Parse($bestOpen.created) - [DateTime]::Parse($firstClosed.created)).TotalDays
+            $openPick.lagDays = [int]$lagDays
+            $openPick.lagMonths = [math]::Round($lagDays / 30.44, 1)
+            $openPick.lagRef = Get-Pick $firstClosed
+        }
+    }
 
     $snapshot = [ordered]@{
         date         = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
@@ -164,6 +177,7 @@ if ($snapshot) {
         bestOpenPrice = if ($snapshot.bestOpen) { $snapshot.bestOpen.blended } else { $null }
         frontierIndex = $snapshot.frontier.index
         bestOpenIndex = if ($snapshot.bestOpen) { $snapshot.bestOpen.index } else { $null }
+        openLagMonths = if ($snapshot.bestOpen -and $null -ne $snapshot.bestOpen.lagMonths) { $snapshot.bestOpen.lagMonths } else { $null }
     }
 }
 $seriesOut = [ordered]@{}

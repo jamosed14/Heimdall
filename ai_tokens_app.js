@@ -63,6 +63,15 @@
       esc(shortName(L.bestOpen)) + " · " + L.bestOpen.index.toFixed(1) + " · " + L.bestOpen.gapPts.toFixed(1) + " pts behind frontier",
       "Highest-scoring model with published weights (OpenRouter lists a Hugging Face repo). The gap is the open/closed capability spread in index points.");
   }
+  if (L.bestOpen && L.bestOpen.lagMonths !== null && L.bestOpen.lagMonths !== undefined && L.bestOpen.lagRef) {
+    var ref = L.bestOpen.lagRef;
+    var refDate = new Date(ref.created + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+    var lagVal = L.bestOpen.lagMonths <= 0 ? "at parity" : L.bestOpen.lagMonths.toFixed(1) + " mo";
+    card("Open-Weight Lag", lagVal,
+      esc(shortName(L.bestOpen)) + " reached the level " + esc(shortName(ref)) + " hit in " + refDate,
+      "Months between a closed model first scoring at least the best open model's index (" + L.bestOpen.index.toFixed(1) +
+      ") and that open model's release. Uses OpenRouter release dates of models still listed (closed models back to 2023 are), so a delisted earlier closed model would make this read short.");
+  }
 
   // ---------- Chart ----------
   var series = T.series || {};
